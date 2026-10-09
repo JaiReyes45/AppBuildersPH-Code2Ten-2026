@@ -10,13 +10,37 @@ class ObjectBoxStore {
 
   final Store store;
 
-  static Future<ObjectBoxStore> open() async {
-    final documents = await getApplicationDocumentsDirectory();
-    final directory = Directory(
-      '${documents.path}${Platform.pathSeparator}objectbox',
-    );
+  static final Map<String, Future<ObjectBoxStore>> _opening = {};
+  static Future<ObjectBoxStore> open({String? directoryPath}) async {
+    final path =
+        directoryPath ??
+        '${(await getApplicationDocumentsDirectory()).path}${Platform.pathSeparator}objectbox';
+    final directory = Directory(path).absolute;
+    final key = directory.path;
+    final existing = _opening[key];
+    if (existing != null) {
+      final instance = await existing;
+      if (!instance.store.isClosed()) return instance;
+      if (!identical(_opening[key], existing)) return open(directoryPath: key);
+      _opening.remove(key);
+    }
+    final future = _openDirectory(directory);
+    _opening[key] = future;
+    try {
+      return await future;
+    } catch (_) {
+      _opening.remove(key);
+      rethrow;
+    }
+  }
+
+  static Future<ObjectBoxStore> _openDirectory(Directory directory) async {
     await directory.create(recursive: true);
-    return ObjectBoxStore(await openStore(directory: directory.path));
+    // Hot restart can leave a native store alive after Dart statics reset.
+    final store = Store.isOpen(directory.path)
+        ? Store.attach(getObjectBoxModel(), directory.path)
+        : await openStore(directory: directory.path);
+    return ObjectBoxStore(store);
   }
 
   Box<IndexedScreenshot> get screenshots => store.box<IndexedScreenshot>();

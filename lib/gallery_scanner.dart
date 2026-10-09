@@ -1,6 +1,9 @@
+import 'semantic_store.dart';
+import 'scan_timings.dart';
+import 'ocr_input.dart';
+
 import 'package:flutter/foundation.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:photo_manager/photo_manager.dart';
 
 import 'gallery_storage.dart';
@@ -211,6 +214,18 @@ class GalleryScanner {
 
   void cancelScan() => _cancelRequested = true;
 
+  Future<SemanticStore?> semanticStore() async {
+    await initialize();
+    return _storage is SemanticStore ? _storage as SemanticStore : null;
+  }
+
+  Future<SearchHistoryStorage?> searchHistoryStorage() async {
+    await initialize();
+    return _storage is SearchHistoryStorage
+        ? _storage as SearchHistoryStorage
+        : null;
+  }
+
   Future<int> countIndexed() async {
     await initialize();
     return _storage!.count();
@@ -226,47 +241,144 @@ class GalleryScanner {
     return _storage!.coverageCount(range);
   }
 
+  final Map<String, AssetEntity> _catalog = {};
+  final Map<String, String> _versions = {};
+  bool _catalogLoaded = false;
+  bool _refreshCatalog = true;
+  DateTime? _catalogWatermark;
+  DateTime? _fullCatalogAt;
+  bool? _catalogLimited;
+  void refreshCatalog() => _refreshCatalog = true;
+  String _version(AssetEntity a) =>
+      '${a.modifiedDateSecond}:${a.width}:${a.height}';
+
+  Future<void> _saveCatalog() async {
+    final storage = _storage;
+    if (storage is! ScanCatalogStorage) return;
+    await (storage as ScanCatalogStorage).saveCatalog({
+      'watermark': _catalogWatermark?.toIso8601String(),
+      'fullAt': _fullCatalogAt?.toIso8601String(),
+      'limited': _catalogLimited,
+      'versions': _versions,
+      'assets': _catalog.values
+          .map(
+            (a) => {
+              'id': a.id,
+              'title': a.title,
+              'width': a.width,
+              'height': a.height,
+              'created': a.createDateSecond,
+              'modified': a.modifiedDateSecond,
+            },
+          )
+          .toList(),
+    });
+  }
+
   Future<List<AssetEntity>> fetchUnindexedAssets({
     required int limit,
     DateTimeRange? dateFilter,
     Set<String> excludeAssetIds = const {},
   }) async {
     if (limit <= 0) return [];
-    final indexed = await indexedAssetIds();
-    final result = <AssetEntity>[];
-    final seen = <String>{};
-    const metadataPageSize = 100;
-    for (var page = 0; !_cancelRequested; page++) {
-      final assets = await _assetSource.page(
-        page: page,
-        size: metadataPageSize,
-        range: dateFilter,
-      );
-      for (final asset in assets) {
-        if (asset.type != AssetType.image ||
-            !seen.add(asset.id) ||
-            indexed.contains(asset.id) ||
-            excludeAssetIds.contains(asset.id)) {
-          continue;
+    await initialize();
+    if (!_catalogLoaded) {
+      final storage = _storage;
+      final state = storage is ScanCatalogStorage
+          ? await (storage as ScanCatalogStorage).loadCatalog()
+          : null;
+      if (state != null) {
+        _catalogWatermark = DateTime.tryParse(
+          state['watermark'] as String? ?? '',
+        );
+        _fullCatalogAt = DateTime.tryParse(state['fullAt'] as String? ?? '');
+        _catalogLimited = state['limited'] as bool?;
+        _versions.addAll(
+          Map<String, String>.from(state['versions'] as Map? ?? {}),
+        );
+        for (final row in state['assets'] as List? ?? []) {
+          final a = AssetEntity(
+            id: row['id'] as String,
+            typeInt: 1,
+            width: row['width'] as int,
+            height: row['height'] as int,
+            title: row['title'] as String?,
+            createDateSecond: row['created'] as int?,
+            modifiedDateSecond: row['modified'] as int?,
+          );
+          _catalog[a.id] = a;
         }
-        final created = asset.createDateTime;
-        if (dateFilter != null &&
-            (created.isBefore(dateFilter.start) ||
-                created.isAfter(dateFilter.end))) {
-          continue;
-        }
-        result.add(asset);
       }
-      // Native paging is explicitly ordered by creation time DESC.
-      if (result.length >= limit || assets.length < metadataPageSize) break;
+      _catalogLoaded = true;
     }
-    result.sort((a, b) => b.createDateTime.compareTo(a.createDateTime));
-    return result.take(limit).toList(growable: false);
+    if (_refreshCatalog) {
+      final timer = Stopwatch()..start();
+      final started = DateTime.now();
+      final full =
+          _fullCatalogAt == null ||
+          started.difference(_fullCatalogAt!).inHours >= 24 ||
+          _catalogLimited != limitedGalleryAccess ||
+          limitedGalleryAccess;
+      final updates = <String, AssetEntity>{};
+      for (var page = 0; !_cancelRequested; page++) {
+        final assets = await _assetSource.page(
+          page: page,
+          size: 100,
+          modifiedSince: full
+              ? null
+              : _catalogWatermark?.subtract(const Duration(seconds: 2)),
+        );
+        for (final a in assets) {
+          if (a.type == AssetType.image) updates[a.id] = a;
+        }
+        if (assets.length < 100) break;
+      }
+      if (!_cancelRequested) {
+        if (full) {
+          _catalog.clear();
+          _fullCatalogAt = started;
+        }
+        _catalog.addAll(updates);
+        _catalogWatermark = started;
+        _catalogLimited = limitedGalleryAccess;
+        _refreshCatalog = false;
+        await _saveCatalog();
+      }
+      ScanTimings.add('metadata', timer.elapsedMicroseconds);
+    }
+    final indexed = await indexedAssetIds();
+    final stored = {for (final r in records) r.assetId: r};
+    final candidates = _catalog.values.where((a) {
+      if (excludeAssetIds.contains(a.id)) return false;
+      if (dateFilter != null &&
+          (a.createDateTime.isBefore(dateFilter.start) ||
+              a.createDateTime.isAfter(dateFilter.end))) {
+        return false;
+      }
+      if (!indexed.contains(a.id)) return true;
+      final version = _versions[a.id];
+      if (version != null) return version != _version(a);
+      final record = stored[a.id];
+      return record == null || a.modifiedDateTime.isAfter(record.scannedAt);
+    }).toList();
+    bool screenshot(AssetEntity a) => RegExp(
+      r'screen[ _-]?(shot|capture)',
+      caseSensitive: false,
+    ).hasMatch(a.title ?? '');
+    candidates.sort((a, b) {
+      final priority = (screenshot(b) ? 1 : 0) - (screenshot(a) ? 1 : 0);
+      return priority != 0
+          ? priority
+          : b.createDateTime.compareTo(a.createDateTime);
+    });
+    return candidates.take(limit).toList();
   }
 
   Future<void> scanSingleAsset(AssetEntity asset) async {
     try {
+      final loading = Stopwatch()..start();
       final image = await asset.file;
+      ScanTimings.add('image_load', loading.elapsedMicroseconds);
       if (image == null) {
         await _saveFailed(
           asset.id,
@@ -316,14 +428,6 @@ class GalleryScanner {
       );
       return;
     }
-    if (_progress.pendingPickedPhotos.isNotEmpty) {
-      yield GalleryScanProgress(
-        status: 'pendingSelection',
-        message: 'Resume selected photos before scanning more gallery photos.',
-        pendingPickedPhotos: _progress.pendingPickedPhotos,
-      );
-      return;
-    }
     _running = true;
     _cancelRequested = false;
     var processed = 0;
@@ -335,8 +439,7 @@ class GalleryScanner {
         await _publish(
           GalleryScanProgress(
             status: 'permissionDenied',
-            message:
-                'Photo access was not granted. Choose specific photos instead.',
+            message: 'Gallery access was not granted. Open Photo permissions, allow all photos, then search again.',
             failed: failedCount,
           ),
         );
@@ -369,8 +472,11 @@ class GalleryScanner {
         attempted.add(asset.id);
         await scanSingleAsset(asset);
         processed++;
-        final successful = await indexedAssetIds();
-        if (!before.contains(asset.id) && successful.contains(asset.id)) {
+        final succeeded = _records.containsKey(asset.id)
+            ? !_records[asset.id]!.isFailed
+            : records.any((r) => r.assetId == asset.id && !r.isFailed);
+        if (succeeded) _versions[asset.id] = _version(asset);
+        if (!before.contains(asset.id) && succeeded) {
           added++;
         }
         await _publish(
@@ -412,6 +518,8 @@ class GalleryScanner {
       yield _progress;
     } finally {
       try {
+        await _saveCatalog();
+        ScanTimings.report();
         if (dateFilter != null && added > 0) {
           await _storage!.upsertCoverage(dateFilter, added);
         }
@@ -444,7 +552,14 @@ class GalleryScanner {
   int get failedCount =>
       _records.values.where((record) => record.isFailed).length;
 
-  Future<void> initialize() => _initialization ??= _initialize();
+  Future<void> initialize() => _initialization ??= _initialize().catchError((
+    Object error,
+    StackTrace stack,
+  ) {
+    // A failed startup must not permanently poison every subsequent scan.
+    _initialization = null;
+    Error.throwWithStackTrace(error, stack);
+  });
 
   Future<void> _initialize() async {
     _storage ??= await createGalleryStorage();
@@ -478,138 +593,86 @@ class GalleryScanner {
     await _publish(restored.copyWith(failed: failedCount), persist: false);
   }
 
+  bool get limitedGalleryAccess => _assetSource.limitedAccess;
+  Future<void> openGallerySettings() => _assetSource.openSettings();
+
+  /// Walk Android's permitted local media library, with no picker/upload step.
   Future<bool> scanGallery() async {
-    if (!isGalleryScanningSupported) {
-      throw UnsupportedError('Gallery scanning is available on Android/iOS.');
+    await initialize();
+    if (!isSupported) {
+      throw UnsupportedError('Gallery scanning requires Android/iOS.');
     }
     if (_running) return false;
     _running = true;
+    _cancelRequested = false;
+    var checked = 0;
     try {
-      final permission = await PhotoManager.requestPermissionExtend(
-        requestOption: const PermissionRequestOption(
-          androidPermission: AndroidPermission(
-            type: RequestType.image,
-            mediaLocation: false,
-          ),
-        ),
-      );
-      if (!permission.hasAccess) {
+      if (!await _assetSource.requestPermission()) {
         await _publish(
           GalleryScanProgress(
             status: 'permissionDenied',
-            message:
-                'Photo access was not granted. Choose specific photos instead.',
-            processed: 0,
-            total: 0,
+            message: 'Gallery access is off. Allow photos in Android settings, then tap Scan gallery.',
             failed: failedCount,
           ),
         );
         return false;
       }
-      final paths = await PhotoManager.getAssetPathList(
-        type: RequestType.image,
-        onlyAll: true,
-      );
-      if (paths.isEmpty) {
-        await _publish(
-          GalleryScanProgress(
-            status: 'complete',
-            message: 'No permitted photos were found.',
-            failed: failedCount,
-          ),
-        );
-        return true;
-      }
-      final path = paths.first;
-      final total = await path.assetCountAsync;
-      var processed = 0;
+      refreshCatalog();
+      final seen = <String>{};
       await _publish(
         GalleryScanProgress(
           status: 'scanning',
-          message: 'Scanning permitted gallery photos…',
-          total: total,
+          message: limitedGalleryAccess
+              ? 'Limited access: scanning only the photos Android permits.'
+              : 'Scanning your device gallery. No upload needed.',
           failed: failedCount,
         ),
       );
-      for (var page = 0; ; page++) {
-        final assets = await path.getAssetListPaged(
-          page: page,
-          size: _pageSize,
+      while (!_cancelRequested) {
+        final assets = await fetchUnindexedAssets(
+          limit: _pageSize,
+          excludeAssetIds: seen,
         );
         if (assets.isEmpty) break;
         for (final asset in assets) {
-          final existing = _records[asset.id];
-          if (existing == null || existing.isFailed) {
-            await scanSingleAsset(asset);
+          if (_cancelRequested) break;
+          seen.add(asset.id);
+          await scanSingleAsset(asset);
+          if (records.any((r) => r.assetId == asset.id && !r.isFailed)) {
+            _versions[asset.id] = _version(asset);
           }
-          processed++;
+          checked++;
           await _publish(
             GalleryScanProgress(
               status: 'scanning',
-              message: 'Scanned $processed of $total photos.',
-              total: total,
-              processed: processed,
+              message:
+                  '$checked new or changed photos checked. You can search now or pause.',
+              processed: checked,
               failed: failedCount,
             ),
           );
         }
+        await _saveCatalog();
       }
       await _publish(
         GalleryScanProgress(
-          status: 'complete',
-          message:
-              'Scan complete. $processed photos checked; $failedCount need retry.',
-          total: total,
-          processed: processed,
+          status: _cancelRequested ? 'cancelled' : 'complete',
+          message: _cancelRequested
+              ? 'Gallery scan paused. Indexed photos are saved.'
+              : '$checked new or changed photos checked; $failedCount need retry.${limitedGalleryAccess ? ' Android has granted selected-photo access only.' : ''}',
+          processed: checked,
+          total: checked,
           failed: failedCount,
         ),
       );
-      return true;
+      return !_cancelRequested;
     } catch (error) {
       await _publish(
         GalleryScanProgress(
           status: 'error',
           message: 'Gallery scan stopped: $error',
-          total: _progress.total,
-          processed: _progress.processed,
+          processed: checked,
           failed: failedCount,
-          pendingPickedPhotos: _progress.pendingPickedPhotos,
-        ),
-      );
-      rethrow;
-    } finally {
-      _running = false;
-      await _closeRecognizer();
-    }
-  }
-
-  Future<void> scanPickedImages(List<XFile> images) async {
-    if (!isGalleryScanningSupported) {
-      throw UnsupportedError('On-device OCR is available on Android/iOS.');
-    }
-    if (_running) return;
-    _running = true;
-    try {
-      final batchId = DateTime.now().microsecondsSinceEpoch;
-      final queue = images.indexed
-          .map(
-            (entry) => PendingPickedPhoto(
-              assetId: 'picked-$batchId-${entry.$1}',
-              displayName: entry.$2.name,
-              sourcePath: entry.$2.path,
-            ),
-          )
-          .toList(growable: true);
-      await _processPickedQueue(queue, total: queue.length);
-    } catch (error) {
-      await _publish(
-        GalleryScanProgress(
-          status: 'error',
-          message: 'Selected-photo scan stopped: $error',
-          total: _progress.total,
-          processed: _progress.processed,
-          failed: failedCount,
-          pendingPickedPhotos: _progress.pendingPickedPhotos,
         ),
       );
       rethrow;
@@ -756,7 +819,7 @@ class GalleryScanner {
           await _saveFailed(
             record.assetId,
             record.displayName,
-            'The original photo is no longer available. Grant access again or choose it from the photo picker.',
+            'The original photo is no longer available. Grant gallery access again in Android settings.',
             record.imagePath,
           );
         } else {
@@ -813,6 +876,11 @@ class GalleryScanner {
     await _closeRecognizer();
     await _storage!.clear();
     _records.clear();
+    _versions.clear();
+    _catalog.clear();
+    _fullCatalogAt = null;
+    refreshCatalog();
+    await _saveCatalog();
     await _publish(const GalleryScanProgress(failed: 0), persist: false);
   }
 
@@ -824,13 +892,54 @@ class GalleryScanner {
   }) async {
     String? imagePath;
     try {
+      final copying = Stopwatch()..start();
       imagePath = await _storage!.saveImage(assetId, sourcePath);
+      ScanTimings.add('copy', copying.elapsedMicroseconds);
       final recognizer = _recognizer ??= TextRecognizer(
         script: TextRecognitionScript.latin,
       );
-      final result = await recognizer.processImage(
-        InputImage.fromFilePath(imagePath),
-      );
+      final resizing = Stopwatch()..start();
+      OcrInput? input;
+      try {
+        input = await OcrInput.prepare(imagePath);
+      } catch (_) {
+        /* Original remains usable. */
+      }
+      ScanTimings.add('resize', resizing.elapsedMicroseconds);
+      late RecognizedText result;
+      var scaleX = input?.scaleX ?? 1.0;
+      var scaleY = input?.scaleY ?? 1.0;
+      final ocr = Stopwatch()..start();
+      try {
+        try {
+          result = await recognizer.processImage(
+            InputImage.fromFilePath(input?.path ?? imagePath),
+          );
+        } catch (_) {
+          if (input?.resized != true) rethrow;
+          result = await recognizer.processImage(
+            InputImage.fromFilePath(imagePath),
+          );
+          scaleX = scaleY = 1;
+          ScanTimings.add('ocr_full_retry', ocr.elapsedMicroseconds);
+        }
+        final lines = result.blocks.expand((b) => b.lines).toList();
+        if (input?.resized == true &&
+            scaleX != 1 &&
+            (result.text.trim().length < 24 ||
+                lines.length < 2 ||
+                lines.any((l) => l.boundingBox.height < 10))) {
+          final retry = Stopwatch()..start();
+          result = await recognizer.processImage(
+            InputImage.fromFilePath(imagePath),
+          );
+          scaleX = scaleY = 1;
+          ScanTimings.add('ocr_full_retry', retry.elapsedMicroseconds);
+        }
+      } finally {
+        await input?.close();
+      }
+      ScanTimings.add('ocr', ocr.elapsedMicroseconds);
       final screenshotId = 'gallery-$assetId';
       final blocks = <GalleryScanBlock>[];
       for (final textBlock in result.blocks) {
@@ -840,10 +949,10 @@ class GalleryScanner {
             GalleryScanBlock(
               id: '$screenshotId-block-${blocks.length}',
               text: line.text.trim(),
-              left: line.boundingBox.left,
-              top: line.boundingBox.top,
-              width: line.boundingBox.width,
-              height: line.boundingBox.height,
+              left: line.boundingBox.left * scaleX,
+              top: line.boundingBox.top * scaleY,
+              width: line.boundingBox.width * scaleX,
+              height: line.boundingBox.height * scaleY,
             ),
           );
         }

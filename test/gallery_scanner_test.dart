@@ -3,6 +3,15 @@ import 'package:gallery_helpdesk/gallery_scanner.dart';
 import 'package:gallery_helpdesk/gallery_storage.dart';
 
 void main() {
+  test('storage initialization can recover after a failed attempt', () async {
+    final storage = _FlakyStorage();
+    final scanner = GalleryScanner(initialStorage: storage);
+    await expectLater(scanner.initialize(), throwsStateError);
+    await scanner.initialize();
+    expect(storage.attempts, 2);
+    await scanner.initialize();
+    expect(storage.attempts, 2);
+  });
   test('scan records round-trip OCR text and source bounding boxes', () {
     final record = GalleryScanRecord(
       assetId: 'asset-42',
@@ -72,6 +81,15 @@ void main() {
     expect(scanner.progress.pendingPickedPhotos.single.assetId, 'picked-3');
     expect(storage.progress?['status'], 'interrupted');
   });
+}
+
+class _FlakyStorage extends _MemoryGalleryStorage {
+  int attempts = 0;
+  @override
+  Future<List<Map<String, dynamic>>> loadRecords() async {
+    if (++attempts == 1) throw StateError('Temporary native startup failure');
+    return super.loadRecords();
+  }
 }
 
 class _MemoryGalleryStorage implements GalleryStorage {

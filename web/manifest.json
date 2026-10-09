@@ -1,6 +1,6 @@
 {
-    "name": "gallery_helpdesk",
-    "short_name": "gallery_helpdesk",
+    "name": "SSeeker",
+    "short_name": "SSeeker",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

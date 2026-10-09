@@ -233,6 +233,62 @@ final _entities = <obx_int.ModelEntity>[
     relations: <obx_int.ModelRelation>[],
     backlinks: <obx_int.ModelBacklink>[],
   ),
+  obx_int.ModelEntity(
+    id: const obx_int.IdUid(4, 4243311210301860595),
+    name: 'SemanticEntry',
+    lastPropertyId: const obx_int.IdUid(7, 4809235359703793178),
+    flags: 0,
+    properties: <obx_int.ModelProperty>[
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(1, 389865762463029546),
+        name: 'id',
+        type: 6,
+        flags: 1,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(2, 2867311572209218758),
+        name: 'key',
+        type: 9,
+        flags: 2080,
+        indexId: const obx_int.IdUid(4, 7431448993327105768),
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(3, 6704747529330239864),
+        name: 'kind',
+        type: 9,
+        flags: 2048,
+        indexId: const obx_int.IdUid(5, 8587171133972160151),
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(4, 5507830585061844223),
+        name: 'version',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(5, 1393324847186326986),
+        name: 'payload',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(6, 3943889085192136424),
+        name: 'updatedAt',
+        type: 10,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(7, 4809235359703793178),
+        name: 'vector',
+        type: 28,
+        flags: 8,
+        indexId: const obx_int.IdUid(6, 1362456188937519440),
+        hnswParams: obx_int.ModelHnswParams(dimensions: 384, distanceType: 2),
+      ),
+    ],
+    relations: <obx_int.ModelRelation>[],
+    backlinks: <obx_int.ModelBacklink>[],
+  ),
 ];
 
 /// Shortcut for [obx.Store.new] that passes [getObjectBoxModel] and for Flutter
@@ -278,8 +334,8 @@ obx_int.ModelDefinition getObjectBoxModel() {
     // Typically, this is done with `dart run build_runner build`.
     generatorVersion: obx_int.GeneratorVersion.v2025_12_16,
     entities: _entities,
-    lastEntityId: const obx_int.IdUid(3, 6352156171564327643),
-    lastIndexId: const obx_int.IdUid(3, 6553712912507568877),
+    lastEntityId: const obx_int.IdUid(4, 4243311210301860595),
+    lastIndexId: const obx_int.IdUid(6, 1362456188937519440),
     lastRelationId: const obx_int.IdUid(0, 0),
     lastSequenceId: const obx_int.IdUid(0, 0),
     retiredEntityUids: const [],
@@ -357,33 +413,26 @@ obx_int.ModelDefinition getObjectBoxModel() {
         );
         final object = IndexedScreenshot()
           ..id = const fb.Int64Reader().vTableGet(buffer, rootOffset, 4, 0)
-          ..galleryAssetId = const fb.StringReader(
-            asciiOptimization: true,
-          ).vTableGet(buffer, rootOffset, 6, '')
-          ..originalName = const fb.StringReader(
-            asciiOptimization: true,
-          ).vTableGet(buffer, rootOffset, 8, '')
-          ..localPath = const fb.StringReader(
-            asciiOptimization: true,
-          ).vTableGetNullable(buffer, rootOffset, 10)
-          ..status = const fb.StringReader(
-            asciiOptimization: true,
-          ).vTableGet(buffer, rootOffset, 12, '')
-          ..error = const fb.StringReader(
-            asciiOptimization: true,
-          ).vTableGetNullable(buffer, rootOffset, 14)
+          ..galleryAssetId = const fb.StringReader(asciiOptimization: true)
+              .vTableGet(buffer, rootOffset, 6, '')
+          ..originalName = const fb.StringReader(asciiOptimization: true)
+              .vTableGet(buffer, rootOffset, 8, '')
+          ..localPath = const fb.StringReader(asciiOptimization: true)
+              .vTableGetNullable(buffer, rootOffset, 10)
+          ..status = const fb.StringReader(asciiOptimization: true)
+              .vTableGet(buffer, rootOffset, 12, '')
+          ..error = const fb.StringReader(asciiOptimization: true)
+              .vTableGetNullable(buffer, rootOffset, 14)
           ..importedAt = DateTime.fromMillisecondsSinceEpoch(
             const fb.Int64Reader().vTableGet(buffer, rootOffset, 16, 0),
           )
           ..assetModifiedAt = assetModifiedAtValue == null
               ? null
               : DateTime.fromMillisecondsSinceEpoch(assetModifiedAtValue)
-          ..contentHash = const fb.StringReader(
-            asciiOptimization: true,
-          ).vTableGetNullable(buffer, rootOffset, 20)
-          ..category = const fb.StringReader(
-            asciiOptimization: true,
-          ).vTableGetNullable(buffer, rootOffset, 22)
+          ..contentHash = const fb.StringReader(asciiOptimization: true)
+              .vTableGetNullable(buffer, rootOffset, 20)
+          ..category = const fb.StringReader(asciiOptimization: true)
+              .vTableGetNullable(buffer, rootOffset, 22)
           ..imageWidth = const fb.Int64Reader().vTableGetNullable(
             buffer,
             rootOffset,
@@ -397,12 +446,10 @@ obx_int.ModelDefinition getObjectBoxModel() {
           ..scannedAt = DateTime.fromMillisecondsSinceEpoch(
             const fb.Int64Reader().vTableGet(buffer, rootOffset, 28, 0),
           )
-          ..scannedAtIso = const fb.StringReader(
-            asciiOptimization: true,
-          ).vTableGet(buffer, rootOffset, 30, '')
-          ..blocksJson = const fb.StringReader(
-            asciiOptimization: true,
-          ).vTableGet(buffer, rootOffset, 32, '')
+          ..scannedAtIso = const fb.StringReader(asciiOptimization: true)
+              .vTableGet(buffer, rootOffset, 30, '')
+          ..blocksJson = const fb.StringReader(asciiOptimization: true)
+              .vTableGet(buffer, rootOffset, 32, '')
           ..embedding = const obx_int.Float32ListReader().vTableGetNullable(
             buffer,
             rootOffset,
@@ -451,18 +498,16 @@ obx_int.ModelDefinition getObjectBoxModel() {
         );
         final object = ScanProgressRow()
           ..id = const fb.Int64Reader().vTableGet(buffer, rootOffset, 4, 0)
-          ..progressJson = const fb.StringReader(
-            asciiOptimization: true,
-          ).vTableGet(buffer, rootOffset, 6, '')
+          ..progressJson = const fb.StringReader(asciiOptimization: true)
+              .vTableGet(buffer, rootOffset, 6, '')
           ..updatedAt = DateTime.fromMillisecondsSinceEpoch(
             const fb.Int64Reader().vTableGet(buffer, rootOffset, 8, 0),
           )
           ..scanStartedAt = scanStartedAtValue == null
               ? null
               : DateTime.fromMillisecondsSinceEpoch(scanStartedAtValue)
-          ..currentCursor = const fb.StringReader(
-            asciiOptimization: true,
-          ).vTableGetNullable(buffer, rootOffset, 12)
+          ..currentCursor = const fb.StringReader(asciiOptimization: true)
+              .vTableGetNullable(buffer, rootOffset, 12)
           ..processedCount = const fb.Int64Reader().vTableGet(
             buffer,
             rootOffset,
@@ -475,9 +520,8 @@ obx_int.ModelDefinition getObjectBoxModel() {
             16,
             0,
           )
-          ..status = const fb.StringReader(
-            asciiOptimization: true,
-          ).vTableGet(buffer, rootOffset, 18, '');
+          ..status = const fb.StringReader(asciiOptimization: true)
+              .vTableGet(buffer, rootOffset, 18, '');
 
         return object;
       },
@@ -520,6 +564,59 @@ obx_int.ModelDefinition getObjectBoxModel() {
             rootOffset,
             12,
             0,
+          );
+
+        return object;
+      },
+    ),
+    SemanticEntry: obx_int.EntityDefinition<SemanticEntry>(
+      model: _entities[3],
+      toOneRelations: (SemanticEntry object) => [],
+      toManyRelations: (SemanticEntry object) => {},
+      getId: (SemanticEntry object) => object.id,
+      setId: (SemanticEntry object, int id) {
+        object.id = id;
+      },
+      objectToFB: (SemanticEntry object, fb.Builder fbb) {
+        final keyOffset = fbb.writeString(object.key);
+        final kindOffset = fbb.writeString(object.kind);
+        final versionOffset = fbb.writeString(object.version);
+        final payloadOffset = fbb.writeString(object.payload);
+        final vectorOffset = object.vector == null
+            ? null
+            : fbb.writeListFloat32(object.vector!);
+        fbb.startTable(8);
+        fbb.addInt64(0, object.id);
+        fbb.addOffset(1, keyOffset);
+        fbb.addOffset(2, kindOffset);
+        fbb.addOffset(3, versionOffset);
+        fbb.addOffset(4, payloadOffset);
+        fbb.addInt64(5, object.updatedAt.millisecondsSinceEpoch);
+        fbb.addOffset(6, vectorOffset);
+        fbb.finish(fbb.endTable());
+        return object.id;
+      },
+      objectFromFB: (obx.Store store, ByteData fbData) {
+        final buffer = fb.BufferContext(fbData);
+        final rootOffset = buffer.derefObject(0);
+
+        final object = SemanticEntry()
+          ..id = const fb.Int64Reader().vTableGet(buffer, rootOffset, 4, 0)
+          ..key = const fb.StringReader(asciiOptimization: true)
+              .vTableGet(buffer, rootOffset, 6, '')
+          ..kind = const fb.StringReader(asciiOptimization: true)
+              .vTableGet(buffer, rootOffset, 8, '')
+          ..version = const fb.StringReader(asciiOptimization: true)
+              .vTableGet(buffer, rootOffset, 10, '')
+          ..payload = const fb.StringReader(asciiOptimization: true)
+              .vTableGet(buffer, rootOffset, 12, '')
+          ..updatedAt = DateTime.fromMillisecondsSinceEpoch(
+            const fb.Int64Reader().vTableGet(buffer, rootOffset, 14, 0),
+          )
+          ..vector = const obx_int.Float32ListReader().vTableGetNullable(
+            buffer,
+            rootOffset,
+            16,
           );
 
         return object;
@@ -686,5 +783,43 @@ class ScanCoverage_ {
   /// See [ScanCoverage.scannedCount].
   static final scannedCount = obx.QueryIntegerProperty<ScanCoverage>(
     _entities[2].properties[4],
+  );
+}
+
+/// [SemanticEntry] entity fields to define ObjectBox queries.
+class SemanticEntry_ {
+  /// See [SemanticEntry.id].
+  static final id = obx.QueryIntegerProperty<SemanticEntry>(
+    _entities[3].properties[0],
+  );
+
+  /// See [SemanticEntry.key].
+  static final key = obx.QueryStringProperty<SemanticEntry>(
+    _entities[3].properties[1],
+  );
+
+  /// See [SemanticEntry.kind].
+  static final kind = obx.QueryStringProperty<SemanticEntry>(
+    _entities[3].properties[2],
+  );
+
+  /// See [SemanticEntry.version].
+  static final version = obx.QueryStringProperty<SemanticEntry>(
+    _entities[3].properties[3],
+  );
+
+  /// See [SemanticEntry.payload].
+  static final payload = obx.QueryStringProperty<SemanticEntry>(
+    _entities[3].properties[4],
+  );
+
+  /// See [SemanticEntry.updatedAt].
+  static final updatedAt = obx.QueryDateProperty<SemanticEntry>(
+    _entities[3].properties[5],
+  );
+
+  /// See [SemanticEntry.vector].
+  static final vector = obx.QueryHnswProperty<SemanticEntry>(
+    _entities[3].properties[6],
   );
 }

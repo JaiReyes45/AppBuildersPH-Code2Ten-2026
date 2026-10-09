@@ -40,10 +40,14 @@ dependencies:
   photo_manager: ^3.12.0
   google_mlkit_text_recognition: ^0.17.1
   path_provider: ^2.1.6
-  image_picker: ^1.2.4
+  # 2.3.x JNI fails to load libdartjni.so on the target Android build.
+  # Keep the platform-channel implementation until native JNI packaging is verified.
+  path_provider_android: 2.2.23
   objectbox: ^5.3.2
   objectbox_flutter_libs: ^5.3.2
   crypto: ^3.0.3
+  flutter_onnxruntime: 1.8.5
+  dart_bert_tokenizer: 1.3.0
 
 dev_dependencies:
   flutter_test:
@@ -69,6 +73,9 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+  assets:
+    - assets/images/welcome_memories.png
+    - assets/models/
 
   # To add assets to your application, add an assets section, like this:
   # assets:

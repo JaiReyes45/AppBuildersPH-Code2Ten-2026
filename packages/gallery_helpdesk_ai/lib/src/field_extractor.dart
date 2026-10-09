@@ -129,6 +129,23 @@ class FieldExtractor {
     ExtractedFieldType type,
   ) {
     if (!labelPattern.hasMatch(labelBlock.text)) return;
+    final labelBox = labelBlock.boundingBox;
+    final valueBox = valueBlock.boundingBox;
+    if (labelBox != null && valueBox != null) {
+      final height = labelBox.height > valueBox.height
+          ? labelBox.height
+          : valueBox.height;
+      final sameRow =
+          (labelBox.top - valueBox.top).abs() <= height &&
+          valueBox.left >= labelBox.left &&
+          valueBox.left - (labelBox.left + labelBox.width) <= height * 8;
+      final nextRow =
+          valueBox.top >= labelBox.top &&
+          valueBox.top - (labelBox.top + labelBox.height) <= height * 3 &&
+          valueBox.left < labelBox.left + labelBox.width &&
+          valueBox.left + valueBox.width > labelBox.left;
+      if (!sameRow && !nextRow) return;
+    }
     final match = _identifierValuePattern.firstMatch(valueBlock.text);
     final value = match?.group(1);
     if (value == null) return;

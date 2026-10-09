@@ -1,16 +1,37 @@
 import 'models.dart';
+import 'typo_matching.dart';
 
 class SearchService {
   List<SearchMatch> search(
     HelpdeskQuery query,
-    Iterable<AnalyzedScreenshot> screenshots,
-  ) {
+    Iterable<AnalyzedScreenshot> screenshots, {
+    bool allowUnconstrained = false,
+  }) {
+    if (!allowUnconstrained &&
+        query.keywords.isEmpty &&
+        query.category == null &&
+        query.amount == null &&
+        query.exactIdentifier == null &&
+        query.requiredPhrases.isEmpty) {
+      return [];
+    }
     final matches = <SearchMatch>[];
     for (final screenshot in screenshots) {
       if (query.category != null && screenshot.category != query.category) {
         continue;
       }
 
+      final normalizedText = screenshot.recognizedText.toLowerCase().replaceAll(
+        RegExp(r'\s+'),
+        ' ',
+      );
+      if (!query.requiredPhrases.every(
+        (phrase) =>
+            RegExp('(?<![a-z0-9])${RegExp.escape(phrase)}(?![a-z0-9])')
+                .hasMatch(normalizedText),
+      )) {
+        continue;
+      }
       final fieldMatches = _matchingFields(query, screenshot);
       if (query.exactIdentifier != null && fieldMatches.isEmpty) continue;
       if (query.amount != null &&
@@ -22,24 +43,36 @@ class SearchService {
 
       final matchingBlocks = <String>{};
       var keywordHits = 0;
+      var approximate = false;
       for (final keyword in query.keywords) {
-        final blocks = screenshot.blocks
-            .where((block) => block.text.toLowerCase().contains(keyword))
+        var blocks = screenshot.blocks
+            .where(
+              (block) =>
+                  RegExp('(?<![a-z0-9])${RegExp.escape(keyword)}(?![a-z0-9])')
+                      .hasMatch(block.text.toLowerCase()),
+            )
             .toList();
+        if (blocks.isEmpty) {
+          blocks = screenshot.blocks
+              .where(
+                (block) =>
+                    RegExp(r'[a-z0-9]+')
+                        .allMatches(block.text.toLowerCase())
+                        .any((m) => nearWord(keyword, m[0]!)),
+              )
+              .toList();
+          if (blocks.isNotEmpty) approximate = true;
+        }
         if (blocks.isNotEmpty) {
           keywordHits++;
           matchingBlocks.addAll(blocks.map((block) => block.id));
         }
       }
 
-      final requiresKeywordHit =
-          query.keywords.isNotEmpty &&
-          query.amount == null &&
-          query.exactIdentifier == null;
-      // Requiring two-thirds coverage avoids returning a screenshot for one
-      // incidental word in a multi-term request.
-      final minimumKeywordHits = (query.keywords.length * 2 + 2) ~/ 3;
-      if (requiresKeywordHit && keywordHits < minimumKeywordHits) continue;
+      // Exact amounts/IDs do not cancel the remaining request details.
+      if (query.keywords.isNotEmpty && keywordHits < query.keywords.length) {
+        continue;
+      }
 
       final citedFields = <ExtractedField>[
         ...fieldMatches,
@@ -52,11 +85,13 @@ class SearchService {
           (query.category == screenshot.category ? 8 : 0) +
           (query.amount != null ? 20 : 0) +
           (query.exactIdentifier != null ? 100 : 0) +
-          keywordHits;
+          keywordHits -
+          (approximate ? 1 : 0);
       matches.add(
         SearchMatch(
           screenshot: screenshot,
           rank: rank,
+          isApproximate: approximate,
           matchingBlockIds: List.unmodifiable(matchingBlocks),
         ),
       );

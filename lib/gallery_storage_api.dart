@@ -16,3 +16,13 @@ abstract interface class GalleryStorage {
   Future<bool> imageExists(String imagePath);
   Future<void> clear();
 }
+
+abstract interface class ScanCatalogStorage {
+  Future<Map<String, dynamic>?> loadCatalog();
+  Future<void> saveCatalog(Map<String, dynamic> state);
+}
+
+abstract interface class SearchHistoryStorage {
+  Future<Map<String, int>> loadSearchCounts();
+  Future<void> saveSearchCounts(Map<String, int> counts);
+}

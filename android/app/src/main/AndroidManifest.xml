@@ -12,7 +12,7 @@
         android:maxSdkVersion="32" />
 
     <application
-        android:label="gallery_helpdesk"
+        android:label="SSeeker"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:allowBackup="false">

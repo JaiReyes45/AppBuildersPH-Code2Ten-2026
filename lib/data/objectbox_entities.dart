@@ -81,3 +81,20 @@ class ScanCoverage {
 
   int scannedCount = 0;
 }
+
+/// Versioned local semantic chunks and explicitly confirmed query memories.
+@Entity()
+class SemanticEntry {
+  @Id()
+  int id = 0;
+  @Unique()
+  String key = '';
+  @Index()
+  String kind = '';
+  String version = '';
+  String payload = '{}';
+  @Property(type: PropertyType.date)
+  DateTime updatedAt = DateTime.now();
+  @HnswIndex(dimensions: 384, distanceType: VectorDistanceType.cosine)
+  Float32List? vector;
+}

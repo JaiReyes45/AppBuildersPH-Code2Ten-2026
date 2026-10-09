@@ -1,4 +1,5 @@
 import 'models.dart';
+import 'typo_matching.dart';
 
 class HelpdeskQueryParser {
   static final RegExp _amountPattern = RegExp(
@@ -19,6 +20,47 @@ class HelpdeskQueryParser {
   );
 
   static const _ignoredWords = {
+    'can',
+    'could',
+    'would',
+    'you',
+    'your',
+    'have',
+    'has',
+    'had',
+    'was',
+    'were',
+    'that',
+    'there',
+    'then',
+    'need',
+    'want',
+    'looking',
+    'look',
+    'get',
+    'locate',
+    'screenshot',
+    'screenshots',
+    'photo',
+    'photos',
+    'image',
+    'images',
+    'picture',
+    'pictures',
+    'saved',
+    'screenshotted',
+    'sent',
+    'send',
+    'paid',
+    'pay',
+    'transferred',
+    'using',
+    'via',
+    'through',
+    'pesos',
+    'peso',
+    'php',
+    'called',
     'a',
     'an',
     'and',
@@ -53,6 +95,10 @@ class HelpdeskQueryParser {
     'orders',
     'number',
     'reference',
+    'ref',
+    'no',
+    'id',
+    'transaction',
     'deadline',
     'due',
     'announcement',
@@ -62,7 +108,22 @@ class HelpdeskQueryParser {
   };
 
   HelpdeskQuery parse(String text) {
+    text = normalizeRequestTypos(text);
+    text = text.replaceAll(
+      RegExp(r'\b(pesos?)\b', caseSensitive: false),
+      'PHP',
+    );
     final lower = text.toLowerCase();
+    final phrases = RegExp(r'"([^"\n]+)"')
+        .allMatches(text)
+        .map((m) => m[1]!.toLowerCase().trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
+    final recipient = RegExp(
+      r'\b(?:sent|send|paid|pay|transferred|transfer)\b.*?\bto\s+([a-z]+(?:\s+[a-z]+)?)(?=\s+(?:for|via|using|on|through)|[?.!]|$)',
+      caseSensitive: false,
+    ).firstMatch(text);
+    if (recipient != null) phrases.add(recipient[1]!.toLowerCase().trim());
     final identifierMatch =
         _referencePattern.firstMatch(text) ??
         _transactionIdPattern.firstMatch(text);
@@ -71,7 +132,11 @@ class HelpdeskQueryParser {
     final amountValue = amountMatch?.group(1) ?? amountMatch?.group(2);
     final amount = amountValue == null ? null : _normalizeAmount(amountValue);
 
-    final exactIdentifier = identifierMatch?.group(1) ?? orderMatch?.group(1);
+    final candidate = identifierMatch?.group(1) ?? orderMatch?.group(1);
+    final exactIdentifier =
+        candidate != null && !_ignoredWords.contains(candidate.toLowerCase())
+        ? candidate
+        : null;
     final exactIdentifierType = identifierMatch != null
         ? ExactIdentifierType.referenceNumber
         : orderMatch != null
@@ -121,6 +186,18 @@ class HelpdeskQueryParser {
         text
             .toLowerCase()
             .replaceAll(_amountPattern, ' ')
+            .replaceAll(
+              exactIdentifier == null ? RegExp(r'(?!)') : _referencePattern,
+              ' ',
+            )
+            .replaceAll(
+              exactIdentifier == null ? RegExp(r'(?!)') : _transactionIdPattern,
+              ' ',
+            )
+            .replaceAll(
+              exactIdentifier == null ? RegExp(r'(?!)') : _orderPattern,
+              ' ',
+            )
             .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
             .split(RegExp(r'\s+'))
             .where((word) => word.length > 1 && !_ignoredWords.contains(word))
@@ -128,6 +205,9 @@ class HelpdeskQueryParser {
             .toList()
           ..sort();
 
+    if (keywords.length > 1) {
+      keywords.removeWhere((w) => w == 'card' || w == 'cards');
+    }
     return HelpdeskQuery(
       originalText: text,
       intent: intent,
@@ -136,6 +216,7 @@ class HelpdeskQueryParser {
       amount: amount,
       exactIdentifier: exactIdentifier,
       exactIdentifierType: exactIdentifierType,
+      requiredPhrases: List.unmodifiable(phrases),
     );
   }
 

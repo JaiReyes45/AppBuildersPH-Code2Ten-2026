@@ -89,6 +89,7 @@ class HelpdeskQuery {
     this.amount,
     this.exactIdentifier,
     this.exactIdentifierType,
+    this.requiredPhrases = const [],
   });
 
   final String originalText;
@@ -98,6 +99,7 @@ class HelpdeskQuery {
   final String? amount;
   final String? exactIdentifier;
   final ExactIdentifierType? exactIdentifierType;
+  final List<String> requiredPhrases;
 }
 
 class SearchMatch {
@@ -105,6 +107,7 @@ class SearchMatch {
     required this.screenshot,
     required this.rank,
     required this.matchingBlockIds,
+    this.isApproximate = false,
   });
 
   final AnalyzedScreenshot screenshot;
@@ -112,6 +115,7 @@ class SearchMatch {
   /// An internal ordering value, not a probability or confidence estimate.
   final int rank;
   final List<String> matchingBlockIds;
+  final bool isApproximate;
 }
 
 class GroundedAnswer {

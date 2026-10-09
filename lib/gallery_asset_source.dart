@@ -4,25 +4,38 @@ import 'gallery_storage_api.dart' show DateTimeRange;
 
 /// Small native boundary so paging/permission behavior can be tested offline.
 class GalleryAssetSource {
-  Future<bool> requestPermission() async =>
-      (await PhotoManager.requestPermissionExtend(
-        requestOption: const PermissionRequestOption(
-          androidPermission: AndroidPermission(
-            type: RequestType.image,
-            mediaLocation: false,
-          ),
+  bool limitedAccess = false;
+  Future<bool> requestPermission() async {
+    final permission = await PhotoManager.requestPermissionExtend(
+      requestOption: const PermissionRequestOption(
+        androidPermission: AndroidPermission(
+          type: RequestType.image,
+          mediaLocation: false,
         ),
-      )).hasAccess;
+      ),
+    );
+    limitedAccess = permission.isLimited;
+    return permission.hasAccess;
+  }
+
+  Future<void> openSettings() => PhotoManager.openSetting();
 
   Future<List<AssetEntity>> page({
     required int page,
     required int size,
     DateTimeRange? range,
+    DateTime? modifiedSince,
   }) => PhotoManager.getAssetListPaged(
     page: page,
     pageCount: size,
     type: RequestType.image,
     filterOption: FilterOptionGroup(
+      updateTimeCond: modifiedSince == null
+          ? null
+          : DateTimeCond(
+              min: modifiedSince,
+              max: DateTime.now().add(const Duration(days: 1)),
+            ),
       createTimeCond: range == null
           ? null
           : DateTimeCond(

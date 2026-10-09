@@ -1,3 +1,5 @@
+import 'package:gallery_helpdesk/semantic_store.dart';
+
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -51,6 +53,41 @@ void main() {
       GalleryScanBlock(id: 'block-1', text: 'PHP 500'),
     ],
   ).toJson();
+
+  test(
+    'frequent searches survive reopen and can be cleared separately',
+    () async {
+      await storage.saveSearchCounts({'receipt': 3, 'orders': 1});
+      await reopen();
+      expect(await storage.loadSearchCounts(), {'receipt': 3, 'orders': 1});
+      await storage.saveSearchCounts({});
+      expect(await storage.loadSearchCounts(), isEmpty);
+    },
+  );
+
+  test('semantic vectors and memory persist; clear removes both', () async {
+    final vector = List<double>.filled(384, 0)..[0] = 1;
+    await storage.writeSemantic(
+      SemanticRecord('chunk:test', 'chunk', 'test', {'id': 'a'}, vector),
+    );
+    await storage.writeSemantic(
+      const SemanticRecord('marker', 'document', 'test', {
+        'fingerprint': 'abc',
+      }, []),
+    );
+    await reopen();
+    expect(
+      (await storage.readSemantic('marker'))?.payload['fingerprint'],
+      'abc',
+    );
+    expect(
+      (await storage.nearestSemantic(vector, 'chunk', 'test')).single.key,
+      'chunk:test',
+    );
+    expect(await storage.nearestSemantic(vector, 'memory', 'test'), isEmpty);
+    await storage.clear();
+    expect(await storage.readSemantic('chunk:test'), isNull);
+  });
 
   setUp(() async {
     temporary = await Directory.systemTemp.createTemp('helpdesk-storage-test-');

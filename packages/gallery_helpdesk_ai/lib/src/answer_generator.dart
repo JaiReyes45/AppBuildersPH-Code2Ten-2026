@@ -41,7 +41,8 @@ class DeterministicAnswerGenerator implements EvidenceAnswerGenerator {
       }
     }
 
-    final clarification = evidence.length > 1;
+    final clarification =
+        evidence.length > 1 || evidence.any((m) => m.isApproximate);
     final prefix = switch (query.intent) {
       HelpdeskIntent.receiptSearch =>
         'I found ${evidence.length} matching GCash-like screenshot(s). Screenshot contents are not verified payment status.',

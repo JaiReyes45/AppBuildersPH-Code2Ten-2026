@@ -1,5 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
+
+import '../semantic_store.dart';
 
 import '../gallery_scanner.dart';
 import '../gallery_storage_api.dart';
@@ -7,12 +10,140 @@ import '../objectbox.g.dart';
 import 'objectbox_entities.dart';
 import 'objectbox_store.dart';
 
-class ObjectBoxGalleryStorage implements GalleryStorage {
+class ObjectBoxGalleryStorage
+    implements
+        GalleryStorage,
+        SemanticStore,
+        ScanCatalogStorage,
+        SearchHistoryStorage {
   ObjectBoxGalleryStorage(this.store, this.root);
+
+  @override
+  Future<Map<String, int>> loadSearchCounts() async {
+    final file = File('${root.path}/search_counts.json');
+    if (!await file.exists()) return {};
+    final data = jsonDecode(await file.readAsString()) as Map;
+    return {
+      for (final entry in data.entries)
+        if (entry.key is String && entry.value is int && entry.value > 0)
+          entry.key as String: entry.value as int,
+    };
+  }
+
+  @override
+  Future<void> saveSearchCounts(Map<String, int> counts) async {
+    final temp = File('${root.path}/search_counts.tmp');
+    await temp.writeAsString(jsonEncode(counts), flush: true);
+    await temp.rename('${root.path}/search_counts.json');
+  }
+
+  @override
+  Future<Map<String, dynamic>?> loadCatalog() async {
+    final file = File('${root.path}/scan_catalog.json');
+    if (!await file.exists()) return null;
+    try {
+      return Map<String, dynamic>.from(
+        jsonDecode(await file.readAsString()) as Map,
+      );
+    } on FormatException {
+      return null;
+    }
+  }
+
+  @override
+  Future<void> saveCatalog(Map<String, dynamic> state) async {
+    final temp = File('${root.path}/scan_catalog.tmp');
+    await temp.writeAsString(jsonEncode(state), flush: true);
+    await temp.rename('${root.path}/scan_catalog.json');
+  }
 
   final ObjectBoxStore store;
   final Directory root;
   final Set<String> _stagedImages = {};
+
+  Box<SemanticEntry> get _semantic => store.store.box<SemanticEntry>();
+  SemanticRecord _decodeSemantic(SemanticEntry row) => SemanticRecord(
+    row.key,
+    row.kind,
+    row.version,
+    Map<String, dynamic>.from(jsonDecode(row.payload) as Map),
+    row.vector?.toList() ?? [],
+  );
+  @override
+  Future<SemanticRecord?> readSemantic(String key) async {
+    final query = _semantic.query(SemanticEntry_.key.equals(key)).build();
+    try {
+      final row = query.findUnique();
+      return row == null ? null : _decodeSemantic(row);
+    } finally {
+      query.close();
+    }
+  }
+
+  @override
+  Future<void> writeSemantic(SemanticRecord record) async {
+    final query = _semantic
+        .query(SemanticEntry_.key.equals(record.key))
+        .build();
+    try {
+      final row = query.findUnique() ?? SemanticEntry();
+      row
+        ..key = record.key
+        ..kind = record.kind
+        ..version = record.version
+        ..payload = jsonEncode(record.payload)
+        ..vector = record.vector.isEmpty
+            ? null
+            : Float32List.fromList(record.vector)
+        ..updatedAt = DateTime.now();
+      _semantic.put(row);
+      if (record.kind == 'memory') {
+        final oldest = _semantic
+            .query(SemanticEntry_.kind.equals('memory'))
+            .order(SemanticEntry_.updatedAt, flags: Order.descending)
+            .build();
+        try {
+          final rows = oldest.find();
+          if (rows.length > 100) {
+            _semantic.removeMany(rows.skip(100).map((r) => r.id).toList());
+          }
+        } finally {
+          oldest.close();
+        }
+      }
+    } finally {
+      query.close();
+    }
+  }
+
+  @override
+  Future<List<SemanticRecord>> nearestSemantic(
+    List<double> vector,
+    String kind,
+    String version, {
+    int limit = 80,
+  }) async {
+    final query = _semantic
+        .query(
+          SemanticEntry_.vector.nearestNeighborsF32(vector, limit) &
+              SemanticEntry_.kind.equals(kind) &
+              SemanticEntry_.version.equals(version),
+        )
+        .build();
+    try {
+      return query
+          .findWithScores()
+          .map((r) => _decodeSemantic(r.object))
+          .toList();
+    } finally {
+      query.close();
+    }
+  }
+
+  @override
+  Future<void> clearSemantic() async {
+    _semantic.removeAll();
+  }
 
   @override
   Future<int> count() async {
@@ -229,7 +360,10 @@ class ObjectBoxGalleryStorage implements GalleryStorage {
       store.screenshots.removeAll();
       store.progress.removeAll();
       store.coverage.removeAll();
+      _semantic.removeAll();
     });
+    final catalog = File('${root.path}/scan_catalog.json');
+    if (await catalog.exists()) await catalog.delete();
     _stagedImages.clear();
     if (await _images.exists()) await _images.delete(recursive: true);
     await _images.create(recursive: true);

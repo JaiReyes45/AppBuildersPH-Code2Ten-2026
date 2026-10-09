@@ -3,7 +3,15 @@ import 'package:gallery_helpdesk/gallery_scanner.dart';
 import 'package:gallery_helpdesk/gallery_storage_api.dart';
 import 'package:photo_manager/photo_manager.dart';
 
-class SearchMemoryStorage implements GalleryStorage {
+class SearchMemoryStorage implements GalleryStorage, ScanCatalogStorage {
+  Map<String, dynamic>? catalog;
+  @override
+  Future<Map<String, dynamic>?> loadCatalog() async => catalog;
+  @override
+  Future<void> saveCatalog(Map<String, dynamic> state) async {
+    catalog = state;
+  }
+
   final Map<String, Map<String, dynamic>> data = {};
   final Map<DateTimeRange, int> coverage = {};
   Map<String, dynamic>? progress;
@@ -73,6 +81,7 @@ class FakeAssetSource extends GalleryAssetSource {
     required int page,
     required int size,
     DateTimeRange? range,
+    DateTime? modifiedSince,
   }) async {
     pages++;
     final filtered =

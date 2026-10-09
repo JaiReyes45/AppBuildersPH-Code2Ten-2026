@@ -7,7 +7,14 @@ import 'data/objectbox_gallery_storage.dart';
 import 'data/objectbox_store.dart';
 import 'gallery_storage_api.dart';
 
-Future<GalleryStorage> createGalleryStorage() async {
+Future<GalleryStorage>? _openingStorage;
+Future<GalleryStorage> createGalleryStorage() => _openingStorage ??=
+    _createGalleryStorage().catchError((Object error, StackTrace stack) {
+      _openingStorage = null;
+      Error.throwWithStackTrace(error, stack);
+    });
+
+Future<GalleryStorage> _createGalleryStorage() async {
   final documents = await getApplicationDocumentsDirectory();
   final root = Directory(
     '${documents.path}${Platform.pathSeparator}gallery_helpdesk',
@@ -37,7 +44,8 @@ class _FileGalleryStorage implements GalleryStorage {
   @override
   Future<Set<String>> allAssetIds() async => (await loadRecords())
       .where((record) => record['status'] != 'failed')
-      .map((record) => record['assetId'] as String).toSet();
+      .map((record) => record['assetId'] as String)
+      .toSet();
 
   // This legacy implementation is no longer selected by the factory.
   @override
@@ -49,17 +57,14 @@ class _FileGalleryStorage implements GalleryStorage {
 
   final Directory root;
 
-  Directory get _records => Directory(
-    '${root.path}${Platform.pathSeparator}records',
-  );
+  Directory get _records =>
+      Directory('${root.path}${Platform.pathSeparator}records');
 
-  Directory get _images => Directory(
-    '${root.path}${Platform.pathSeparator}images',
-  );
+  Directory get _images =>
+      Directory('${root.path}${Platform.pathSeparator}images');
 
-  File get _progress => File(
-    '${root.path}${Platform.pathSeparator}scan_progress.json',
-  );
+  File get _progress =>
+      File('${root.path}${Platform.pathSeparator}scan_progress.json');
 
   Future<void> initialize() async {
     await _records.create(recursive: true);
@@ -129,8 +134,7 @@ class _FileGalleryStorage implements GalleryStorage {
     await initialize();
     final key = base64Url.encode(utf8.encode(assetId)).replaceAll('=', '');
     await for (final entity in _images.list()) {
-      if (entity is File &&
-          entity.uri.pathSegments.last.startsWith('$key.')) {
+      if (entity is File && entity.uri.pathSegments.last.startsWith('$key.')) {
         return entity.path;
       }
     }
@@ -146,9 +150,7 @@ class _FileGalleryStorage implements GalleryStorage {
   @override
   Future<void> saveRecord(Map<String, dynamic> record) async {
     await initialize();
-    await File(_recordPath(record['assetId'] as String)).writeAsString(
-      jsonEncode(record),
-      flush: true,
-    );
+    await File(_recordPath(record['assetId'] as String))
+        .writeAsString(jsonEncode(record), flush: true);
   }
 }

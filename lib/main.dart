@@ -4,39 +4,72 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:gallery_helpdesk_ai/gallery_helpdesk_ai.dart';
-import 'package:image_picker/image_picker.dart';
 
 import 'dart:math' as math;
 
 import 'evidence_image.dart';
 import 'gallery_scanner.dart';
+import 'gallery_storage_api.dart' show SearchHistoryStorage;
+import 'search_counts.dart';
 import 'query_date_hint.dart';
 import 'query_normalizer.dart';
+import 'semantic_search.dart';
+import 'scan_timings.dart';
+import 'local_embedder.dart';
 
 part 'home.dart';
+part 'box_library.dart';
+part 'discovery_ui.dart';
 
 void main() => runApp(const GalleryHelpdeskApp());
-const ink = Color(0xFF303B54);
-const paper = Color(0xFFF7F5F0);
+const ink = Color(0xFF352F40);
+const paper = Color(0xFFFAF7F0);
+const violet = Color(0xFF7957B4);
+const lavender = Color(0xFFEDE6F6);
+const editorial = TextStyle(
+  fontFamily: 'Georgia',
+  fontFamilyFallback: ['serif'],
+  color: ink,
+  fontWeight: FontWeight.w700,
+);
 
 class GalleryHelpdeskApp extends StatelessWidget {
   final String? fontFamily;
-  const GalleryHelpdeskApp({super.key, this.fontFamily});
+  final GalleryScanner? scanner;
+  final bool autoScanGallery;
+  final bool showDemoContent;
+  const GalleryHelpdeskApp({
+    super.key,
+    this.fontFamily,
+    this.scanner,
+    this.autoScanGallery = false,
+    this.showDemoContent = kIsWeb,
+  });
   @override
   Widget build(BuildContext context) => MaterialApp(
-    title: 'Gallery Helpdesk',
+    title: 'SSeeker',
     debugShowCheckedModeBanner: false,
     theme: ThemeData(
       fontFamily: fontFamily,
       useMaterial3: true,
       scaffoldBackgroundColor: paper,
-      colorScheme: ColorScheme.fromSeed(seedColor: ink),
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: violet,
+        primary: violet,
+        surface: paper,
+      ),
       appBarTheme: const AppBarTheme(
         backgroundColor: paper,
         foregroundColor: ink,
       ),
     ),
-    home: const HomeScreen(),
+    home: StartupReveal(
+      child: HomeScreen(
+        scanner: scanner,
+        autoScanGallery: autoScanGallery,
+        showDemoContent: showDemoContent,
+      ),
+    ),
   );
 }
 
@@ -47,6 +80,7 @@ class Evidence {
   final List<String> matchingBlockIds;
   final String? sourceImagePath;
   final bool isGallerySource;
+  final Map<String, String> fields;
   const Evidence(
     this.title,
     this.category,
@@ -60,6 +94,7 @@ class Evidence {
     this.matchingBlockIds = const [],
     this.sourceImagePath,
     this.isGallerySource = false,
+    this.fields = const {},
   });
 
   Evidence withSourceMatches({
@@ -78,6 +113,7 @@ class Evidence {
     matchingBlockIds: blockIds,
     sourceImagePath: sourceImagePath,
     isGallerySource: isGallerySource,
+    fields: fields,
   );
 }
 
@@ -138,6 +174,8 @@ class DetailScreen extends StatelessWidget {
           children: [
             Text(
               evidence.title,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
               style: const TextStyle(
                 fontSize: 26,
                 fontWeight: FontWeight.w700,
@@ -160,16 +198,41 @@ class DetailScreen extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(evidence.field),
-                  const SizedBox(height: 8),
-                  SelectableText(
-                    evidence.value,
-                    style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: ink,
-                    ),
+                  const Text(
+                    'Extracted details',
+                    style: TextStyle(fontWeight: FontWeight.w700),
                   ),
+                  for (final entry in evidence.fields.entries)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 10),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            entry.key,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Colors.black54,
+                            ),
+                          ),
+                          SelectableText(
+                            entry.value,
+                            style: const TextStyle(fontSize: 14),
+                          ),
+                        ],
+                      ),
+                    ),
+                  if (evidence.fields.isEmpty) Text(evidence.field),
+                  const SizedBox(height: 8),
+                  if (evidence.fields.isEmpty)
+                    SelectableText(
+                      evidence.value,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: ink,
+                      ),
+                    ),
                   const SizedBox(height: 12),
                   OutlinedButton.icon(
                     icon: const Icon(Icons.copy, size: 18),
@@ -223,35 +286,52 @@ class DetailScreen extends StatelessWidget {
                 border: Border.all(color: const Color(0xFFE1E5DD)),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: SelectableText.rich(
-                TextSpan(
-                  style: const TextStyle(color: ink, fontSize: 16, height: 1.8),
-                  children: evidence.source
-                      .split('\n')
-                      .asMap()
-                      .entries
-                      .map(
-                        (line) => TextSpan(
-                          text: '${line.value}\n',
-                          style:
-                              evidence.matchingBlockIds.contains(
-                                    '${evidence.sourceScreenshotId}-block-${line.key}',
-                                  ) ||
-                                  evidence.matchingBlockIds.isEmpty &&
-                                      (line.value.contains(evidence.value) ||
-                                          (evidence.category ==
-                                                  'Announcements' &&
-                                              line.value.contains(
-                                                'October 12',
-                                              )))
-                              ? const TextStyle(
-                                  backgroundColor: Color(0xFFFFEDAC),
-                                  fontWeight: FontWeight.w700,
-                                )
-                              : null,
+              child: Material(
+                color: Colors.white,
+                child: ExpansionTile(
+                  title: const Text(
+                    'Full OCR text',
+                    style: TextStyle(fontSize: 14),
+                  ),
+                  children: [
+                    SelectableText.rich(
+                      TextSpan(
+                        style: const TextStyle(
+                          color: ink,
+                          fontSize: 13,
+                          height: 1.5,
                         ),
-                      )
-                      .toList(),
+                        children: evidence.source
+                            .split('\n')
+                            .asMap()
+                            .entries
+                            .map(
+                              (line) => TextSpan(
+                                text: '${line.value}\n',
+                                style:
+                                    evidence.matchingBlockIds.contains(
+                                          '${evidence.sourceScreenshotId}-block-${line.key}',
+                                        ) ||
+                                        evidence.matchingBlockIds.isEmpty &&
+                                            (line.value.contains(
+                                                  evidence.value,
+                                                ) ||
+                                                (evidence.category ==
+                                                        'Announcements' &&
+                                                    line.value.contains(
+                                                      'October 12',
+                                                    )))
+                                    ? const TextStyle(
+                                        backgroundColor: Color(0xFFFFEDAC),
+                                        fontWeight: FontWeight.w700,
+                                      )
+                                    : null,
+                              ),
+                            )
+                            .toList(),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),

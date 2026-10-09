@@ -1,22 +1,46 @@
-# Gallery Helpdesk front-end preview
+# Balik / Gallery Helpdesk preview
 
-An interactive Flutter front-end using four fictional examples. Includes submitted keyword searches, an animated robot rummaging through a box, a “Ta-da!” result state, category filters, source details/highlights, copying a sample field, cancellation, manual browsing when a match is uncertain, and a reminder preview. The robot is drawn in Flutter, requiring no remote images or animation assets. Reduced-motion settings disable its continuous movement.
+The UI follows the supplied Balik reference with ivory, violet and lavender,
+serif headings, a shuffled photo-card welcome and a moving magnifying glass.
+The welcome is decorative and skippable; it does not indicate scan coverage.
+All decorative photos are bundled AI-generated assets. No remote image or
+font service is used. The existing bot still searches inside its box and
+presents a found screenshot.
 
-Gallery access, OCR, ObjectBox, AI inference, persistence, and notifications are not connected. Source previews are recreated text, not real screenshots. No internet is required to interact with the installed preview.
+## Run
 
-## Run in VS Code
-
-Open this repository, run `flutter pub get`, choose a device, and press F5.
+Open this repository (the directory with `pubspec.yaml`) in VS Code:
 
 ```sh
+flutter pub get
 flutter run -d chrome
 ```
 
-For an Android phone, enable USB debugging, connect it, run `flutter devices`, and then `flutter run -d <device-id>`.
+For a phone, enable USB debugging, connect it, run `flutter devices`, then
+`flutter run -d <device-id>`. Restart the app to replay the opening animation.
 
-Try “GCash 500”, “headphones”, or “proposal deadline” and submit with the arrow or keyboard search action. “GCash 9999” demonstrates uncertain results with a receipt collection for manual browsing. Switch categories to browse other samples. Cancel an active search or start again. Open a result to inspect its source. Use the information button for demo limitations.
+Web is the sample/UI preview. Android supports gallery scanning, on-device
+ML Kit OCR and persisted ObjectBox records. Native MiniLM embeddings and confirmed-query memory are integrated. Generative
+LLM answers and notifications remain unimplemented. See README for native
+setup and device-test limitations.
 
-```sh
-flutter analyze
-flutter test
-```
+## Try the interactions
+
+1. Skip the welcome or let it finish; tap **Need a hand** for a scripted tip.
+2. Search **headphones**, **GCash 500**, or **proposal deadline**. These can
+   return labeled fictional examples. Native gallery scanning may also run.
+3. Search **GCash 9999** to explore manual category browsing.
+4. Open the history icon or **Pick up where you left off**, reopen a source,
+   then clear history. It retains up to 50 unique fetched screenshots during
+   this session, not across restarts. Clearing it does not delete photos.
+5. Test system reduced-motion and enlarged text settings. Real scan progress
+   and cancel/retry controls remain available on supported phones.
+
+## Rendered mobile previews
+
+- [Opening](preview/balik-opening.png)
+- [Home](preview/balik-home.png)
+- [History](preview/balik-history.png)
+
+Captured at 390 x 844 with desktop fonts. Platform serif rendering can differ
+on Android. The native photo-permission and OCR workflows require device QA.

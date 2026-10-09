@@ -1,9 +1,101 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:photo_manager/photo_manager.dart';
 
 import 'search_test_fakes.dart';
 
 void main() {
+  test(
+    'screenshots precede newer photos, cursor survives restart, edits rescan',
+    () async {
+      final memory = SearchMemoryStorage();
+      AssetEntity asset(String id, int modified, String title) => AssetEntity(
+        id: id,
+        typeInt: 1,
+        width: 100,
+        height: 200,
+        title: title,
+        createDateSecond: id == 'photo' ? 200 : 100,
+        modifiedDateSecond: modified,
+      );
+      final source = FakeAssetSource([
+        asset('photo', 100, 'camera.jpg'),
+        asset('screen', 100, 'Screenshot.png'),
+      ]);
+      final first = FakeOcrScanner(memory, source);
+      await first.scanUpTo(additionalCount: 1).toList();
+      expect(first.processedIds, ['screen']);
+      final pages = source.pages;
+      await first.scanUpTo(additionalCount: 1).toList();
+      expect(
+        source.pages,
+        pages,
+        reason: 'Next batch uses catalog instead of restarting enumeration',
+      );
+      final restarted = FakeOcrScanner(memory, source);
+      await restarted.scanUpTo(additionalCount: 5).toList();
+      expect(restarted.processedIds, isEmpty);
+      source.assets[1] = asset('screen', 200, 'Screenshot.png');
+      restarted.refreshCatalog();
+      await restarted.scanUpTo(additionalCount: 5).toList();
+      expect(restarted.processedIds, ['screen']);
+    },
+  );
+
+  test('full gallery scan requests permission and pages automatically without a picker', () async {
+    final memory = SearchMemoryStorage();
+    final source = FakeAssetSource(
+      List.generate(
+        65,
+        (i) => fakeAsset('$i', DateTime(2026, 10, 10, 0, 0, i)),
+      ),
+    );
+    final scanner = FakeOcrScanner(memory, source);
+    expect(await scanner.scanGallery(), isTrue);
+    expect(source.permissionRequests, 1);
+    expect(source.pages, 1);
+    expect(scanner.processedIds.length, 65);
+    expect(scanner.progress.status, 'complete');
+    await scanner.scanGallery();
+    expect(
+      scanner.processedIds.length,
+      65,
+      reason: 'Unchanged indexed photos must not run OCR again',
+    );
+  });
+  test(
+    'full gallery scan reports denial and limited access accurately',
+    () async {
+      final source = FakeAssetSource([fakeAsset('one', DateTime(2026))])
+        ..granted = false;
+      final scanner = FakeOcrScanner(SearchMemoryStorage(), source);
+      expect(await scanner.scanGallery(), isFalse);
+      expect(source.pages, 0);
+      expect(scanner.progress.status, 'permissionDenied');
+      source
+        ..granted = true
+        ..limitedAccess = true;
+      expect(await scanner.scanGallery(), isTrue);
+      expect(scanner.limitedGalleryAccess, isTrue);
+      expect(scanner.progress.message, contains('selected-photo access only'));
+    },
+  );
+  test('full scan pauses and resumes without losing indexed work', () async {
+    final source = FakeAssetSource(
+      List.generate(4, (i) => fakeAsset('$i', DateTime(2026, 10, 10, 0, 0, i))),
+    );
+    final scanner = FakeOcrScanner(SearchMemoryStorage(), source);
+    scanner.onProgress = (progress) {
+      if (progress.processed == 1) scanner.cancelScan();
+    };
+    expect(await scanner.scanGallery(), isFalse);
+    expect(scanner.processedIds.length, 1);
+    expect(scanner.progress.status, 'cancelled');
+    scanner.onProgress = null;
+    expect(await scanner.scanGallery(), isTrue);
+    expect(scanner.processedIds.length, 4);
+  });
+
   test(
     'newest assets first; successful IDs skipped; failed assets retryable',
     () async {

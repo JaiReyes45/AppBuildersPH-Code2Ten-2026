@@ -1,0 +1,3 @@
+
+# Preserve exact bundled model/tokenizer bytes for manifest hash checks.
+assets/models/** -text

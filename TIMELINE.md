@@ -8,14 +8,14 @@ Target an installable complete MVP tonight. Tomorrow is for regression, packagin
 
 | Time | Steps | Owners | Exit criterion |
 | --- | --- | --- | --- |
-| 2:15–2:30 PM | Confirm judging rules, submission format, private repo visibility, Android demo phone, and available teammates. Choose 20 synthetic screenshots with known answers. | All; D checks rules | Required AI/offline criteria recorded; target phone connected. |
+| 2:15–2:30 PM | Confirm judging rules, submission format, private repo visibility, Android demo phone, and available teammates. Choose synthetic GCash-like receipts, order screenshots, student announcements, and unrelated gallery images with known answers. | All; D checks rules | Required AI/offline criteria recorded; target phone connected. |
 | 2:30–3:00 PM | Create Flutter scaffold; pin dependencies; commit lockfile. Agree data models and service signatures. Add navigation and interfaces. Assign branches. | A leads; all agree contracts | Everyone runs the same app; interfaces merged to main. |
-| 3:00–4:30 PM | A builds import/list/detail UI; B proves bundled OCR on fresh offline install; C implements local repository and keyword ranking while separately spiking embeddings; D builds reminder confirmation/notification spike and test fixtures. | A/B/C/D in parallel | OCR works offline; search/storage prototype; reminder delivered. |
+| 3:00–4:30 PM | A builds gallery/helpdesk/list/detail UI; B enumerates permitted gallery assets and proves bundled OCR on fresh offline install; C implements ObjectBox repository, exact fields and keyword ranking while separately spiking embeddings; D builds helpdesk response templates, reminder/notification spike and test fixtures. | A/B/C/D in parallel | OCR works offline; search/storage prototype; reminder delivered. |
 | **4:30 PM checkpoint** | Decide whether semantic search passes device, memory, tokenizer, latency, and offline checks. Review judging requirements. Drop it from delivery scope if it fails unless mandatory; adjust scope explicitly. | C reports; all decide | Written feature decision; working keyword search remains. |
-| 4:30–6:00 PM | Wire app-owned image copies, OCR blocks, indexing progress, persistent storage, and search UI. Add deletion and exact duplicate handling. | A+B+C; D verifies | End-to-end import -> OCR -> search -> source view on main. |
+| 4:30–6:00 PM | Wire app-owned image copies, OCR blocks, indexing progress, persistent storage, and search UI. Add candidate order/receipt/announcement fields, deletion and exact duplicate handling. | A+B+C; D verifies | End-to-end import -> OCR -> search -> source view on main. |
 | 6:00–6:30 PM | Meal break; stagger if necessary. Review blockers and remaining scope. | All | No unowned blocker. |
 | 6:30–7:45 PM | Map OCR boxes to image preview; add explicit deadline candidate parser and editable confirmation. Integrate reminder service. Add optional proven semantic backend. | A source UI; B OCR; C search; D reminders | Find -> verify -> act works in airplane mode. |
-| 7:45–8:30 PM | First full integration checkpoint. Restart persistence test, cancel/denied import, no-text image, ambiguous dates, notification denied, and deletion. Fix blockers. | All; D coordinates | HP-01–HP-08 exercised; failures logged with owners. |
+| 7:45–8:30 PM | First full integration checkpoint. Restart persistence test, cancel/denied import, no-text image, ambiguous dates, notification denied, and deletion. Fix blockers. | All; D coordinates | HP-01–HP-12 exercised; failures logged with owners. |
 | 8:30–9:30 PM | Handle indexing interruption, bounded batches, error states, empty search, and permission messaging. Test search examples against labeled fixtures. | A/B/C; D retests | Demo fixtures produce verifiable results; no crash on major edge cases. |
 | 9:30–10:15 PM | Build first release APK; install fresh on phone offline. Check native/model assets in release, image permissions, reminders, and persistence. | A release; B/C runtime; D QA | First usable release artifact exists. |
 | **10:15 PM feature freeze** | Stop adding features. Record known limitations. Only fix correctness, stability, and demo blockers. | All | Feature list matches actual implementation. |
@@ -40,8 +40,8 @@ Target an installable complete MVP tonight. Tomorrow is for regression, packagin
 1. Rules and phone validation.
 2. Shared contracts and scaffold.
 3. Bundled offline OCR.
-4. Persisted imports and searchable index.
-5. Search results and source verification.
+4. Permitted gallery scan, ObjectBox index, and extracted field candidates.
+5. Helpdesk results for orders, GCash-like receipts and announcements, with source verification.
 6. Confirmed local reminders.
 7. Fresh offline release verification.
 8. Accurate demo materials and accessible submission.
@@ -49,8 +49,15 @@ Target an installable complete MVP tonight. Tomorrow is for regression, packagin
 ## Scope cuts if delayed
 
 - At 4:30 PM: remove unproven semantic search; keep OCR AI and keyword search, subject to judging rules.
-- At 6:00 PM: keep selected-image import; remove automatic album browsing and background indexing.
+- At 6:00 PM: keep foreground paged gallery scanning and selected-photo fallback; remove continuous background scanning.
 - At 8:30 PM: remove grouping, collections, and cosmetic animations. Never remove honest error states or source verification.
-- At 10:15 PM: no extra model integration. Preserve the working release.
+- At 10:15 PM: no extra model integration; retain evidence templates if Gemma is unproven. Preserve the working release.
 - If reminders fail: clearly label the limitation and keep a confirmed in-app deadline list. Do not demonstrate a fake notification or claim delivery. Decide whether the fallback still meets submission rules.
+
+
+## Updated scope checkpoints
+
+- This remains the original delivery baseline; completed/past blocks are not claims of implementation. If starting later, collapse setup time, preserve release/submission buffers, and cut optional models first.
+- By the model checkpoint, verify ObjectBox persistence and gallery enumeration alongside bundled OCR. Semantic retrieval and Gemma are independently gated; never delay exact identifier search for them.
+- By integration, the helpdesk must answer one order-number request, one GCash-like receipt request, and one announcement request with real screenshot evidence.
 

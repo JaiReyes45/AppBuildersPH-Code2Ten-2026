@@ -24,6 +24,7 @@ key.properties
 private_samples/
 local_models/
 .idea/
+*.iml
 .vscode/
 Thumbs.db
 .DS_Store

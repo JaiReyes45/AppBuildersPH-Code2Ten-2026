@@ -2,9 +2,106 @@
 
 **Gallery Helpdesk** — an offline Android assistant that scans the user's permitted local gallery to find order numbers, GCash receipt details, and student announcements, and answers requests with linked screenshot evidence.
 
-> Status: the Flutter application is not implemented yet. An initial standalone Dart AI core is in `packages/gallery_helpdesk_ai`; gallery/OCR/storage adapters and conditional model integrations remain pending. Features below are acceptance criteria, not claims of completed app functionality.
+> Status: an interactive Flutter front-end and a standalone Dart helpdesk core are implemented. The front-end uses fictional sample data and does not yet call the core. Gallery scanning, OCR, ObjectBox, embedding/LLM inference, persistence, and real notifications remain pending. The product requirements farther below are planned acceptance criteria, not completed functionality.
 
 **Deadline:** Saturday, October 10, 2026, 10:00 AM, Asia/Manila (UTC+8).
+
+## Run the current app
+
+### Prerequisites
+
+- Flutter with Dart compatible with `sdk: ^3.13.5`; development verification used Flutter 3.47.7 / Dart 3.13.5.
+- Git and Chrome for the easiest preview. Android Studio/SDK plus an emulator or USB-debugging-enabled phone for Android.
+- Initial checkout and dependency installation require internet. No cloud service/API key is used by the sample UI.
+
+Clone the private repository using an account with access, then run commands **from the project root containing pubspec.yaml**, not from the Flutter SDK folder:
+
+```sh
+git clone https://github.com/JaiReyes45/AppBuildersPH-Code2Ten-2026.git
+cd AppBuildersPH-Code2Ten-2026
+flutter doctor
+flutter pub get
+flutter run -d chrome
+```
+
+For the original developer's existing Windows checkout:
+
+```powershell
+cd "C:\Users\Guienne Jairo Reyes\OneDrive\Documents\ChatGPT\AppBuilderPh-Hackathon"
+flutter pub get
+flutter run -d chrome
+```
+
+To preview mobile dimensions in Chrome, open Developer Tools with F12, toggle device mode with Ctrl+Shift+M, choose a phone or 390 x 844, and refresh. Browser device mode previews layout; it does not verify Android permissions/native AI.
+
+For Android:
+
+```sh
+flutter emulators
+flutter emulators --launch <emulator-id>
+flutter devices
+flutter run -d <device-id>
+```
+
+Replace placeholders with the listed IDs. The original workstation has an emulator named `flutter_android`; other contributors may need to create one. A physical phone needs USB debugging and authorization of the connected computer. First Android builds may download Gradle/build artifacts; an Android release APK has not yet been verified.
+
+In VS Code, open this repository folder, open `lib/main.dart`, select Chrome or Android in the device selector, and press F5. If `flutter` is not recognized, restart VS Code after adding the SDK's `bin` folder to PATH. `Target file lib/main.dart not found` means the terminal is in the wrong directory.
+
+### Try the current interactions
+
+1. Submit **headphones**, **GCash 500**, or **proposal deadline** using the arrow or keyboard search action.
+2. The robot rummages through a box during a simulated search, then presents a “Ta-da!” result.
+3. Open a result to view recreated source text, highlighted details, and a copy action.
+4. Submit **GCash 9999** to see uncertain results with receipt samples for manual browsing; switch categories to browse other examples.
+5. Cancel a running search or start again. Announcement details include a reminder preview; it does not schedule a notification.
+
+Four fictional records are built into `lib/main.dart`. The UI performs simple keyword matching after a simulated delay; the animation is not proof of real AI processing. There are no actual gallery screenshots in the demo, and changes are not persisted. Reduced-motion settings stop continuous robot movement.
+
+![Mobile result-state preview](preview/found.png)
+
+See [PREVIEW.md](PREVIEW.md) for the focused front-end guide.
+
+## Current progress
+
+| Area | Implemented | Still needed |
+| --- | --- | --- |
+| Flutter UI | Android/web scaffold, search and category browsing, loading/cancel/success/uncertain states, animated robot, source detail/highlights, copy field, reminder preview | Connect service interfaces, actual screenshot thumbnails/full images, permission and indexing screens |
+| Dart core | Heuristic classification, candidate extraction, query parsing, ranking, deterministic answers and source IDs in `packages/gallery_helpdesk_ai` | Fix reviewed retrieval/extraction bugs; connect to UI and OCR/storage adapters |
+| Gallery/OCR | Planned | photo_manager permissions, paged/resumable scan, bundled ML Kit Latin OCR, source boxes and image copies |
+| Local database | ObjectBox selected | Entities, generated bindings/model IDs, persistence, incremental indexing, deletion, optional vector indexes |
+| Local models | MiniLM and optional Gemma selected as candidates | Compatible bundled weights/tokenizer/runtime, phone benchmarking, integration and offline proof |
+| Reminders | Confirmation preview | Editable date confirmation, local notification permissions/scheduling and device delivery checks |
+| Verification | Four Flutter interaction tests; Dart core has nine existing tests | Integration/regression tests, actual Android release, real gallery and clean-install offline checks |
+
+### Run checks
+
+The app and standalone package have separate dependency sets. Install both before analyzing the combined repository:
+
+```sh
+flutter pub get
+cd packages/gallery_helpdesk_ai
+dart pub get
+dart analyze
+dart test
+cd ../..
+flutter analyze
+flutter test
+```
+
+Flutter tests cover animated search/result navigation, fallback category browsing, cancellation, and narrow-screen/large-text layout. The existing core tests passing does not resolve the additional bugs identified in review.
+
+## Next changes, in priority order
+
+1. **Fix the core before integration:** normalize currency-suffix amounts such as `500 PHP`; evaluate identifier and amount filters independently; stop presenting weak partial matches as exact answers; handle reference labels/values split across OCR blocks with preserved provenance. Add regression tests for each.
+2. **Connect the UI to the core:** replace fictional results with repository-backed records and map source block IDs to highlights. Keep incomplete/uncertain answers explicit; animation duration should follow real processing rather than a fixed demo timer.
+3. **Implement gallery scanning and OCR:** request permitted media access, support selected-only access, queue local images, persist progress, retry failed images, and use bundled ML Kit models from first launch offline.
+4. **Implement ObjectBox:** coordinate generated entity IDs/model JSON, store metadata/OCR/fields, support new/changed/deleted assets, retain app-owned evidence copies, and expose deletion controls.
+5. **Add semantic search after device validation:** bundle compatible MiniLM ONNX weights and tokenizer, chunk long OCR, normalize vectors, use a 384-dimensional ObjectBox vector index, and preserve exact number filters.
+6. **Optionally add local Gemma 3 1B:** benchmark memory/speed and generate only evidence-supported summaries. Keep deterministic fallback responses; do not silently correct identifiers or execute screenshot instructions.
+7. **Finish reminders and accessibility:** confirm ambiguous dates, verify actual notifications, test text scaling, screen reader descriptions, and reduced motion on the demo phone.
+8. **Validate and deliver:** create a release APK, test fresh-install airplane-mode scanning/search and all three content categories, record actual limitations, update model attribution, and prepare submission artifacts.
+
+These tasks are not claims that a model or payment-verification system has been implemented. The app will retrieve what screenshots show; it cannot authenticate a GCash payment or check live order status.
 
 ## Product scope
 
@@ -76,9 +173,9 @@ Keep native plugin work in its supported execution context. Run CPU ranking off 
 
 Suggested service boundaries: GalleryService, ScanQueue, OcrService, FieldExtractor, ScreenshotRepository, SearchService, HelpdeskService, DeadlineParser, ReminderService. Agree on interfaces before parallel implementation. Store candidate deadline separately from the user's confirmed deadline. Store source image files on disk; ObjectBox stores paths/metadata rather than full-resolution image blobs.
 
-## Build and run once the app exists
+## Release build (after Android verification)
 
-These commands apply after the Flutter scaffold is added; they are not executable project instructions yet.
+The scaffold now exists. Use the run/check instructions above for the current preview; the release command below is a next verification step, not evidence of an already tested APK.
 
 ```sh
 flutter doctor

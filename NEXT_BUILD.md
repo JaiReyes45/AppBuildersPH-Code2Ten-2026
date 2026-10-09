@@ -34,3 +34,36 @@ After these gates: decide whether reminders/notifications belong in the next rel
 - Full tests and analysis pass; device release and accessibility checks recorded. Current baseline: 75 Flutter tests, 25 core tests, clean Flutter analysis and installed Android debug APK.
 
 Use branches and small PRs for the next build. Coordinate changes to `home.dart`, native build files, dependency lockfile and ObjectBox entities/generated IDs. Do not commit personal gallery images, extracted personal text, credentials, private keys or APK binaries.
+
+
+---
+
+## Issue found Oct 10 — semantic fallback doesn't rescue zero-hit framing words
+
+**Reproduced on:** Samsung A54 (SM-A546E), Android 16, ~600+ gallery items partially indexed.
+
+**Test queries:**
+
+| Query | Result |
+| --- | --- |
+| `Diancie` | ✅ Instant, correct — keyword path works |
+| `screenshit of charizard card` | ✅ Works — typo tolerance and short framing words (`of`, `card`) tolerated |
+| `pokemon card called Diancie` | ❌ Triggers endless scan, never resolves |
+| `pokemon card called Diancie that I screenshotted in September` | ❌ Same |
+| `pokemon card called Diancie` (after partial 600-image scan) | ❌ Same |
+
+**Root cause (narrowed):** The failing query contains `pokemon`, which likely has **zero hits** in the current OCR index (the card says "Diancie", not "Pokemon"). The two-phase search runs keyword/exact-field retrieval first and keeps extending the OCR scan in 40-image passes looking for a token that will never match. The semantic backfill that would understand *"pokemon card" ≈ "Diancie"* is deferred until the OCR loop exhausts — which, on a 1,000+ image gallery, effectively never happens.
+
+The typo test proves the parser and matcher work when tokens are findable. The failure is specifically about **zero-hit tokens blocking semantic fallback.**
+
+**Requested change (Priority 2 — search/data):**
+
+1. **Early semantic fallback:** if any keyword token returns zero hits in the current index, immediately run a bounded semantic pass for the whole query rather than scanning deeper.
+2. **Framing word stripping:** expand the existing stop-word list to include `called`, `named`, `that I screenshotted`, `the one where`, `show me`, `find me`. ("of" and "card" already appear to be handled.)
+3. **Cap on scan extension:** consider capping total scan extension per query at, say, 3 batches (120 images) before forcing semantic fallback and returning whatever candidates exist, rather than scanning indefinitely.
+
+**Acceptance test:** `pokemon card called Diancie` must return the Diancie screenshot without scanning beyond the current index depth on a 600+ image gallery.
+
+**Impact:** Compound natural-language queries are the primary UX judges will try. The `screenshit of charizard card` result shows the pipeline *can* work — the gap is specifically zero-hit framing words.
+
+**Workaround for demo:** Tap **This is the one** on a `Diancie` result once, then re-run the compound query — memory should short-circuit the scan. (Not yet verified.)

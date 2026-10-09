@@ -1,0 +1,29 @@
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+coverage/
+android/local.properties
+android/.gradle/
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Generated.xcconfig
+ios/Flutter/flutter_export_environment.sh
+
+# Local configuration and private artifacts
+.env
+.env.*
+!.env.example
+*.jks
+*.keystore
+key.properties
+*.apk
+*.aab
+private_samples/
+local_models/
+.idea/
+.vscode/
+Thumbs.db
+.DS_Store

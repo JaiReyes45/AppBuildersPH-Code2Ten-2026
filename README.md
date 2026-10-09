@@ -2,7 +2,7 @@
 
 **Gallery Helpdesk** — an offline Android assistant that scans the user's permitted local gallery to find order numbers, GCash receipt details, and student announcements, and answers requests with linked screenshot evidence.
 
-> Status: an interactive Flutter front-end and a standalone Dart helpdesk core are implemented. The front-end uses fictional sample data and does not yet call the core. Gallery scanning, OCR, ObjectBox, embedding/LLM inference, persistence, and real notifications remain pending. The product requirements farther below are planned acceptance criteria, not completed functionality.
+> Status: the Flutter front-end and standalone Dart helpdesk core are connected. Android now offers permitted-gallery scanning and selected-photo import, Latin-script on-device OCR, persisted OCR/source metadata and private image copies, scan progress, and retry for failed images. Search combines scanned OCR with fictional examples. ObjectBox, embeddings/LLM inference, and real notifications remain pending. First-use airplane-mode behavior and native permission flows still need verification on the target tablet.
 
 **Deadline:** Saturday, October 10, 2026, 10:00 AM, Asia/Manila (UTC+8).
 
@@ -10,7 +10,7 @@
 
 ### Prerequisites
 
-- Flutter with Dart compatible with `sdk: ^3.13.5`; development verification used Flutter 3.47.7 / Dart 3.13.5.
+- Flutter with Dart compatible with `sdk: ^3.13.3`; local verification uses Flutter 3.47.3 / Dart 3.13.3.
 - Git and Chrome for the easiest preview. Android Studio/SDK plus an emulator or USB-debugging-enabled phone for Android.
 - Initial checkout and dependency installation require internet. No cloud service/API key is used by the sample UI.
 
@@ -49,13 +49,14 @@ In VS Code, open this repository folder, open `lib/main.dart`, select Chrome or 
 
 ### Try the current interactions
 
-1. Submit **headphones**, **GCash 500**, or **proposal deadline** using the arrow or keyboard search action.
-2. The robot rummages through a box during a simulated search, then presents a “Ta-da!” result.
-3. Open a result to view recreated source text, highlighted details, and a copy action.
-4. Submit **GCash 9999** to see uncertain results with receipt samples for manual browsing; switch categories to browse other examples.
-5. Cancel a running search or start again. Announcement details include a reminder preview; it does not schedule a notification.
+1. On Android, grant permitted gallery access with **Scan permitted gallery**, or use **Choose photos** for selected-only access. Scanning runs one image at a time in pages of 24.
+2. Watch persisted scan progress; use **Retry failed** for unreadable or temporarily unavailable images. Scans resume by skipping already recorded gallery assets.
+3. Search **headphones**, **GCash 500**, or **proposal deadline**. The offline Dart core searches sample text and locally scanned OCR blocks.
+4. Open a result to view its private image copy, recognized text, highlighted matching lines, and a copy action. **Clear scan** removes app-owned copies and OCR records without altering gallery originals.
+5. Submit **GCash 9999** to see uncertain results with receipt samples for manual browsing; switch categories to browse other examples.
+6. Cancel a running search or start again. Announcement details include a reminder preview; it does not schedule a notification.
 
-Four fictional records are built into `lib/main.dart`. The UI performs simple keyword matching after a simulated delay; the animation is not proof of real AI processing. There are no actual gallery screenshots in the demo, and changes are not persisted. Reduced-motion settings stop continuous robot movement.
+Four fictional records are built into `lib/main.dart` and passed as OCR text blocks to `packages/gallery_helpdesk_ai`. The core also receives scanned OCR blocks with per-line source IDs and bounding boxes. Local scan records and copied source images are persisted under the app documents directory as an interim store; ObjectBox is not yet integrated. The selected-photo picker avoids requiring broad gallery access. Reduced-motion settings stop continuous robot movement.
 
 ![Mobile result-state preview](preview/found.png)
 
@@ -65,13 +66,13 @@ See [PREVIEW.md](PREVIEW.md) for the focused front-end guide.
 
 | Area | Implemented | Still needed |
 | --- | --- | --- |
-| Flutter UI | Android/web scaffold, search and category browsing, loading/cancel/success/uncertain states, animated robot, source detail/highlights, copy field, reminder preview | Connect service interfaces, actual screenshot thumbnails/full images, permission and indexing screens |
-| Dart core | Heuristic classification, candidate extraction, query parsing, ranking, deterministic answers and source IDs in `packages/gallery_helpdesk_ai` | Fix reviewed retrieval/extraction bugs; connect to UI and OCR/storage adapters |
-| Gallery/OCR | Planned | photo_manager permissions, paged/resumable scan, bundled ML Kit Latin OCR, source boxes and image copies |
-| Local database | ObjectBox selected | Entities, generated bindings/model IDs, persistence, incremental indexing, deletion, optional vector indexes |
-| Local models | MiniLM and optional Gemma selected as candidates | Compatible bundled weights/tokenizer/runtime, phone benchmarking, integration and offline proof |
+| Flutter UI | Android/web scaffold, AI-core-backed search, permission/selected-photo scan controls, progress/retry state, source image/text detail and clear-scan action | Manual pause, deletion of individual records, and Android/iOS permission/device validation |
+| Dart core | Heuristic classification, candidate extraction, query parsing, exact-filter and keyword ranking, deterministic answers, and source block IDs; connected to samples and scanned OCR | Evaluate extraction and retrieval against labeled gallery images |
+| Gallery/OCR | `photo_manager` permitted-image paging; `image_picker` selected-photo fallback; ML Kit Latin OCR in sequential batches of 24; OCR line IDs/bounding boxes; progress and per-image retry; app-private evidence copies | Verify permission variants, fresh-install offline OCR, revoked/deleted assets, and long-running scans on the target tablet |
+| Local database | ObjectBox selected; `build_runner` and `objectbox_generator` are configured. The scanner currently persists JSON metadata plus image copies under the app documents directory. | Replace interim files with ObjectBox runtime/entities/generated bindings, detect modified/deleted assets, and add individual-record deletion |
+| Local models | No local embedding or LLM runtime enabled | The proposed Gemma packages have moved to `flutter_edge_ai`; compatible bundled assets, tokenizer/runtime integration, offline proof, and target-device benchmarks are unverified. Leave optional features off until validated. |
 | Reminders | Confirmation preview | Editable date confirmation, local notification permissions/scheduling and device delivery checks |
-| Verification | Four Flutter interaction tests; Dart core has nine existing tests | Integration/regression tests, actual Android release, real gallery and clean-install offline checks |
+| Verification | Four Flutter interaction tests; two scanner serialization/resume tests; Dart core has fourteen tests | Integration tests with synthetic gallery images, device permission/OCR checks, and clean-install airplane-mode verification |
 
 ### Run checks
 
@@ -88,18 +89,16 @@ flutter analyze
 flutter test
 ```
 
-Flutter tests cover animated search/result navigation, fallback category browsing, cancellation, and narrow-screen/large-text layout. The existing core tests passing does not resolve the additional bugs identified in review.
+Flutter tests cover AI-backed search/source results, fallback category browsing, and narrow-screen/large-text layout. Scanner tests cover OCR record/bounding-box round trips and interrupted-progress restoration. Dart core tests cover extraction, exact and amount filters, split OCR provenance, weak keyword rejection, and deterministic answers.
 
 ## Next changes, in priority order
 
-1. **Fix the core before integration:** normalize currency-suffix amounts such as `500 PHP`; evaluate identifier and amount filters independently; stop presenting weak partial matches as exact answers; handle reference labels/values split across OCR blocks with preserved provenance. Add regression tests for each.
-2. **Connect the UI to the core:** replace fictional results with repository-backed records and map source block IDs to highlights. Keep incomplete/uncertain answers explicit; animation duration should follow real processing rather than a fixed demo timer.
-3. **Implement gallery scanning and OCR:** request permitted media access, support selected-only access, queue local images, persist progress, retry failed images, and use bundled ML Kit models from first launch offline.
-4. **Implement ObjectBox:** coordinate generated entity IDs/model JSON, store metadata/OCR/fields, support new/changed/deleted assets, retain app-owned evidence copies, and expose deletion controls.
-5. **Add semantic search after device validation:** bundle compatible MiniLM ONNX weights and tokenizer, chunk long OCR, normalize vectors, use a 384-dimensional ObjectBox vector index, and preserve exact number filters.
-6. **Optionally add local Gemma 3 1B:** benchmark memory/speed and generate only evidence-supported summaries. Keep deterministic fallback responses; do not silently correct identifiers or execute screenshot instructions.
-7. **Finish reminders and accessibility:** confirm ambiguous dates, verify actual notifications, test text scaling, screen reader descriptions, and reduced motion on the demo phone.
-8. **Validate and deliver:** create a release APK, test fresh-install airplane-mode scanning/search and all three content categories, record actual limitations, update model attribution, and prepare submission artifacts.
+1. **Implement ObjectBox:** coordinate generated entity IDs/model JSON, move scan metadata/OCR/fields from the interim JSON index, detect changed/deleted assets, and expose individual-record deletion controls.
+2. **Validate gallery/OCR on the target tablet:** exercise full, selected-only, denied and revoked access; retry/delete cases; and fresh-install airplane-mode OCR and search.
+3. **Evaluate optional semantic search:** only proceed with compatible bundled MiniLM ONNX weights and tokenizer, correct chunking/normalization, and measured offline performance on the target tablet. Preserve exact number filters.
+4. **Optionally add local Gemma:** benchmark the maintained runtime/model format, memory, speed, and offline behavior; generate only evidence-supported summaries. Keep deterministic fallback responses; do not silently correct identifiers or execute screenshot instructions.
+5. **Finish reminders and accessibility:** confirm ambiguous dates, verify actual notifications, test text scaling, screen reader descriptions, and reduced motion on the demo phone.
+6. **Validate and deliver:** create a release APK, test fresh-install airplane-mode scanning/search and all three content categories, record actual limitations, update model attribution, and prepare submission artifacts.
 
 These tasks are not claims that a model or payment-verification system has been implemented. The app will retrieve what screenshots show; it cannot authenticate a GCash payment or check live order status.
 

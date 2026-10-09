@@ -14,7 +14,245 @@ class _HomeScreenState extends State<HomeScreen> {
   SearchPhase phase = SearchPhase.idle;
   String category = 'All';
   List<Evidence> matches = [];
+  String? answerText;
+  bool scannerReady = false;
+  String? scannerError;
+  GalleryScanProgress scanProgress = const GalleryScanProgress();
+  final Map<String, Evidence> galleryEvidence = {};
   int request = 0;
+  final GalleryHelpdeskAi ai = GalleryHelpdeskAi();
+  final GalleryScanner scanner = GalleryScanner();
+  final ImagePicker imagePicker = ImagePicker();
+
+  @override
+  void initState() {
+    super.initState();
+    scanner.onProgress = (progress) {
+      if (mounted) setState(() => scanProgress = progress);
+    };
+    scanner.onRecord = (record) {
+      if (!mounted) return;
+      setState(() {
+        if (record.isFailed) {
+          galleryEvidence.remove(record.assetId);
+        } else {
+          galleryEvidence[record.assetId] = _evidenceForRecord(record);
+        }
+      });
+    };
+    unawaited(_initializeScanner());
+  }
+
+  Future<void> _initializeScanner() async {
+    try {
+      await scanner.initialize();
+      if (!mounted) return;
+      setState(() {
+        scannerReady = true;
+        scanProgress = scanner.progress;
+        for (final record in scanner.records.where(
+          (record) => !record.isFailed,
+        )) {
+          galleryEvidence[record.assetId] = _evidenceForRecord(record);
+        }
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        scannerReady = true;
+        scannerError = 'Could not load the local scan index: $error';
+      });
+    }
+  }
+
+  List<Evidence> get _availableEvidence => [
+    ...samples,
+    ...galleryEvidence.values,
+  ];
+
+  Evidence _evidenceForRecord(GalleryScanRecord record) {
+    final screenshotId = 'gallery-${record.assetId}';
+    final blocks = record.blocks
+        .map(
+          (block) => OcrBlock(
+            id: block.id,
+            text: block.text,
+            boundingBox:
+                block.left == null ||
+                    block.top == null ||
+                    block.width == null ||
+                    block.height == null
+                ? null
+                : OcrBoundingBox(
+                    left: block.left!,
+                    top: block.top!,
+                    width: block.width!,
+                    height: block.height!,
+                  ),
+          ),
+        )
+        .toList(growable: false);
+    final analyzed = ai.analyze(
+      OcrScreenshot(screenshotId: screenshotId, blocks: blocks),
+    );
+    final category = switch (analyzed.category) {
+      HelpdeskCategory.gcashReceipt => 'Receipts',
+      HelpdeskCategory.order => 'Orders',
+      HelpdeskCategory.announcement => 'Announcements',
+      HelpdeskCategory.other || HelpdeskCategory.unknown => 'Other',
+    };
+    final preferredFields = switch (analyzed.category) {
+      HelpdeskCategory.gcashReceipt => [
+        ExtractedFieldType.referenceNumber,
+        ExtractedFieldType.amount,
+        ExtractedFieldType.transactionDate,
+      ],
+      HelpdeskCategory.order => [
+        ExtractedFieldType.orderNumber,
+        ExtractedFieldType.itemName,
+        ExtractedFieldType.amount,
+      ],
+      HelpdeskCategory.announcement => [
+        ExtractedFieldType.deadline,
+        ExtractedFieldType.title,
+      ],
+      HelpdeskCategory.other || HelpdeskCategory.unknown => const [],
+    };
+    ExtractedField? primaryField;
+    for (final type in preferredFields) {
+      for (final field in analyzed.fields) {
+        if (field.type == type) {
+          primaryField = field;
+          break;
+        }
+      }
+      if (primaryField != null) break;
+    }
+    primaryField ??= analyzed.fields.firstOrNull;
+    final firstLine = blocks
+        .map((block) => block.text.trim())
+        .firstWhere((line) => line.isNotEmpty, orElse: () => 'Scanned photo');
+    final titleField = analyzed.fields.where(
+      (field) =>
+          field.type == ExtractedFieldType.itemName ||
+          field.type == ExtractedFieldType.title,
+    );
+    final title = titleField.isNotEmpty ? titleField.first.rawValue : firstLine;
+    final date = record.scannedAt.toLocal();
+    final dateLabel =
+        'Scanned ${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+    final fieldLabel = switch (primaryField?.type) {
+      ExtractedFieldType.referenceNumber => 'Reference number',
+      ExtractedFieldType.orderNumber => 'Order number',
+      ExtractedFieldType.amount => 'Amount',
+      ExtractedFieldType.transactionDate => 'Transaction date',
+      ExtractedFieldType.deadline => 'Deadline',
+      ExtractedFieldType.title => 'Title',
+      ExtractedFieldType.itemName => 'Item',
+      null => 'Recognized text',
+    };
+    final recognizedText = record.recognizedText;
+    return Evidence(
+      title,
+      category,
+      dateLabel,
+      primaryField?.rawValue ?? firstLine,
+      fieldLabel,
+      primaryField?.rawValue ?? recognizedText,
+      recognizedText,
+      switch (category) {
+        'Receipts' => Icons.receipt_long_outlined,
+        'Orders' => Icons.shopping_bag_outlined,
+        'Announcements' => Icons.school_outlined,
+        _ => Icons.image_outlined,
+      },
+      sourceScreenshotId: screenshotId,
+      matchingBlockIds: const [],
+      sourceImagePath: record.imagePath,
+      isGallerySource: true,
+    );
+  }
+
+  Future<void> _scanGallery() async {
+    try {
+      final granted = await scanner.scanGallery();
+      if (!granted && mounted) {
+        _showScanMessage(
+          'Choose specific photos if you do not want to grant gallery access.',
+        );
+      }
+    } catch (error) {
+      _showScanMessage('Gallery scan failed: $error');
+    }
+  }
+
+  Future<void> _choosePhotos() async {
+    try {
+      final images = await imagePicker.pickMultiImage();
+      if (images.isEmpty) return;
+      await scanner.scanPickedImages(images);
+    } catch (error) {
+      _showScanMessage('Selected-photo scan failed: $error');
+    }
+  }
+
+  Future<void> _resumeInterruptedScan() async {
+    try {
+      await scanner.resumeInterruptedScan();
+    } catch (error) {
+      _showScanMessage('Could not resume the interrupted scan: $error');
+    }
+  }
+
+  Future<void> _retryFailedPhotos() async {
+    try {
+      await scanner.retryFailed();
+    } catch (error) {
+      _showScanMessage('Could not retry failed photos: $error');
+    }
+  }
+
+  Future<void> _clearScannedPhotos() async {
+    final shouldClear = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Remove scanned photos?'),
+        content: const Text(
+          'This deletes the app’s private image copies and local OCR records. Original gallery photos will not be changed.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Keep photos'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Remove scan data'),
+          ),
+        ],
+      ),
+    );
+    if (shouldClear != true) return;
+    try {
+      await scanner.clear();
+      if (mounted) {
+        setState(() {
+          galleryEvidence.clear();
+          matches = [];
+          answerText = null;
+          phase = SearchPhase.idle;
+        });
+      }
+    } catch (error) {
+      _showScanMessage('Could not clear scan data: $error');
+    }
+  }
+
+  void _showScanMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
+  }
 
   @override
   void dispose() {
@@ -37,48 +275,62 @@ class _HomeScreenState extends State<HomeScreen> {
     if (page.hasClients) {
       page.jumpTo(0);
     }
-    // Simulates future on-device retrieval; no gallery or AI is accessed.
-    await Future<void>.delayed(const Duration(milliseconds: 1800));
+    final evidenceById = <String, Evidence>{};
+    final indexedSamples = <AnalyzedScreenshot>[];
+    final corpus = _availableEvidence;
+    for (final entry in corpus.asMap().entries) {
+      final evidence = entry.value;
+      final screenshotId = evidence.sourceScreenshotId ?? 'sample-${entry.key}';
+      evidenceById[screenshotId] = evidence;
+      indexedSamples.add(
+        ai.analyze(
+          OcrScreenshot(
+            screenshotId: screenshotId,
+            blocks: evidence.source
+                .split('\n')
+                .asMap()
+                .entries
+                .where((line) => line.value.trim().isNotEmpty)
+                .map(
+                  (line) => OcrBlock(
+                    id: '$screenshotId-block-${line.key}',
+                    text: line.value.trim(),
+                  ),
+                )
+                .toList(growable: false),
+          ),
+        ),
+      );
+    }
+    final answer = await ai.answer(input, indexedSamples);
     if (!mounted || ticket != request) return;
-    final tokens = input
-        .toLowerCase()
-        .split(RegExp(r'[^a-z0-9]+'))
-        .where(
-          (w) =>
-              w.length > 2 &&
-              ![
-                'find',
-                'show',
-                'what',
-                'the',
-                'for',
-                'please',
-                'have',
-                'receipt',
-                'receipts',
-                'number',
-              ].contains(w),
-        )
-        .toList();
-    final candidates = samples.where((e) {
-      final text = '${e.title} ${e.summary} ${e.field} ${e.value} ${e.source}'
-          .toLowerCase();
-      return tokens.isNotEmpty && tokens.every(text.contains);
-    }).toList();
+    final candidates = <Evidence>[];
+    for (final source in answer.sources) {
+      final evidence = evidenceById[source.screenshot.screenshotId];
+      if (evidence != null) {
+        candidates.add(
+          evidence.withSourceMatches(
+            screenshotId: source.screenshot.screenshotId,
+            blockIds: source.matchingBlockIds,
+          ),
+        );
+      }
+    }
+    final parsedQuery = ai.parseQuery(input);
     setState(() {
       matches = candidates;
+      answerText = answer.text;
       phase = candidates.isNotEmpty ? SearchPhase.found : SearchPhase.uncertain;
       if (phase == SearchPhase.uncertain) {
-        final lower = input.toLowerCase();
-        if (lower.contains('gcash') || lower.contains('receipt')) {
-          category = 'Receipts';
-        }
-        if (lower.contains('order')) category = 'Orders';
-        if (lower.contains('announcement') || lower.contains('deadline')) {
-          category = 'Announcements';
-        }
+        category = switch (parsedQuery.category) {
+          HelpdeskCategory.gcashReceipt => 'Receipts',
+          HelpdeskCategory.order => 'Orders',
+          HelpdeskCategory.announcement => 'Announcements',
+          HelpdeskCategory.other || HelpdeskCategory.unknown || null => 'All',
+        };
       }
     });
+    if (page.hasClients) page.jumpTo(0);
   }
 
   void reset() {
@@ -87,6 +339,8 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       phase = SearchPhase.idle;
       category = 'All';
+      matches = [];
+      answerText = null;
     });
     if (page.hasClients) {
       page.jumpTo(0);
@@ -97,7 +351,8 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final browsing =
         phase == SearchPhase.idle || phase == SearchPhase.uncertain;
-    final visible = (browsing ? samples : matches)
+    final evidence = _availableEvidence;
+    final visible = (browsing ? evidence : matches)
         .where((e) => category == 'All' || e.category == category)
         .toList();
     final title = switch (phase) {
@@ -109,7 +364,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final subtitle = switch (phase) {
       SearchPhase.idle => 'Ask about a receipt, order, or class announcement.',
       SearchPhase.searching =>
-        'Checking the sample screenshots for your request.',
+        'Checking sample and locally scanned photos for your request.',
       SearchPhase.found =>
         '${matches.length} matching ${matches.length == 1 ? 'screenshot' : 'screenshots'}. Open one to check the details.',
       SearchPhase.uncertain => 'I couldn’t find an exact match. Browse these samples or try a different detail.',
@@ -154,11 +409,11 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                       SizedBox(height: 12),
                       Text(
-                        'This interactive preview uses four fictional examples and a simulated search animation. Gallery scanning, OCR, ObjectBox, AI inference, and notifications are not connected.',
+                        'Search uses the offline Dart helpdesk core with fictional examples and any photos you choose to scan. Gallery images are copied to private app storage for OCR and source viewing; nothing is uploaded. First-use airplane-mode behavior still needs testing on the target tablet. ObjectBox, language-model inference, and notifications are not connected.',
                       ),
                       SizedBox(height: 12),
                       Text(
-                        'In the finished app, answers will link to the original screenshot. Nothing will be sent to the cloud.',
+                        'Clear scan removes the app’s copies and OCR index, not the original gallery photos.',
                       ),
                     ],
                   ),
@@ -175,18 +430,24 @@ class _HomeScreenState extends State<HomeScreen> {
             controller: page,
             padding: const EdgeInsets.fromLTRB(22, 4, 22, 28),
             children: [
-              const Row(
+              Row(
                 children: [
                   Icon(Icons.circle, size: 7, color: Color(0xFF658878)),
                   SizedBox(width: 6),
                   Expanded(
                     child: Text(
-                      'Sample gallery · front-end preview',
+                      !kIsWeb && galleryEvidence.isNotEmpty
+                          ? 'Local gallery OCR + sample text · offline AI core'
+                          : 'Sample OCR text · offline AI core',
                       style: TextStyle(fontSize: 12, color: Colors.black54),
                     ),
                   ),
                 ],
               ),
+              if (isGalleryScanningSupported) ...[
+                const SizedBox(height: 12),
+                _galleryScanPanel(),
+              ],
               Semantics(
                 label: phase == SearchPhase.searching
                     ? 'Bot looking inside a box'
@@ -216,6 +477,35 @@ class _HomeScreenState extends State<HomeScreen> {
                   color: Colors.black54,
                 ),
               ),
+              if (answerText != null) ...[
+                const SizedBox(height: 14),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE9EEE6),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Evidence-based answer',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: ink,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      SelectableText(
+                        answerText!,
+                        style: const TextStyle(fontSize: 13, height: 1.45),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 24),
               TextField(
                 controller: query,
@@ -310,20 +600,22 @@ class _HomeScreenState extends State<HomeScreen> {
                 SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   child: Row(
-                    children: ['All', 'Receipts', 'Orders', 'Announcements']
-                        .map(
-                          (s) => Padding(
-                            padding: const EdgeInsets.only(right: 7),
-                            child: ChoiceChip(
-                              label: Text(s),
-                              selected: category == s,
-                              showCheckmark: false,
-                              selectedColor: const Color(0xFFDDE7E0),
-                              onSelected: (_) => setState(() => category = s),
-                            ),
-                          ),
-                        )
-                        .toList(),
+                    children:
+                        ['All', 'Receipts', 'Orders', 'Announcements', 'Other']
+                            .map(
+                              (s) => Padding(
+                                padding: const EdgeInsets.only(right: 7),
+                                child: ChoiceChip(
+                                  label: Text(s),
+                                  selected: category == s,
+                                  showCheckmark: false,
+                                  selectedColor: const Color(0xFFDDE7E0),
+                                  onSelected: (_) =>
+                                      setState(() => category = s),
+                                ),
+                              ),
+                            )
+                            .toList(),
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -331,7 +623,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   const Padding(
                     padding: EdgeInsets.all(24),
                     child: Text(
-                      'No samples in this category. Try All.',
+                      'No scanned photos in this category. Try All.',
                       textAlign: TextAlign.center,
                     ),
                   ),
@@ -346,6 +638,99 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _galleryScanPanel() {
+    final running = scanProgress.isScanning;
+    final indexedCount = scanner.records
+        .where((record) => !record.isFailed)
+        .length;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: const Color(0xFFE2DED6)),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Scan photos on this device',
+            style: TextStyle(fontWeight: FontWeight.w700, color: ink),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '$indexedCount indexed · ${scanner.failedCount} failed',
+            style: const TextStyle(fontSize: 12, color: Colors.black54),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Scans stay on this device. Clear scan removes the app’s copies and OCR data.',
+            style: TextStyle(fontSize: 11, color: Colors.black54),
+          ),
+          if (running || scanProgress.total > 0) ...[
+            const SizedBox(height: 10),
+            LinearProgressIndicator(value: running ? scanProgress.fraction : 1),
+          ],
+          const SizedBox(height: 6),
+          Text(
+            scannerError ?? scanProgress.message,
+            style: TextStyle(
+              fontSize: 12,
+              color: scannerError == null
+                  ? Colors.black54
+                  : Colors.red.shade700,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: [
+              OutlinedButton.icon(
+                onPressed: scannerReady && !running
+                    ? scanProgress.status == 'interrupted'
+                        ? _resumeInterruptedScan
+                        : _scanGallery
+                    : null,
+                icon: const Icon(Icons.photo_library_outlined, size: 18),
+                label: Text(
+                  switch (scanProgress.status) {
+                    'interrupted'
+                        when scanProgress.pendingPickedPhotos.isNotEmpty =>
+                      'Resume selected photos',
+                    'interrupted' => 'Resume gallery scan',
+                    _ => 'Scan permitted gallery',
+                  },
+                ),
+              ),
+              FilledButton.tonalIcon(
+                onPressed: scannerReady && !running ? _choosePhotos : null,
+                icon: const Icon(Icons.add_photo_alternate_outlined, size: 18),
+                label: const Text('Choose photos'),
+              ),
+              if (scanner.failedCount > 0 &&
+                  scanProgress.pendingPickedPhotos.isEmpty)
+                TextButton.icon(
+                  onPressed: scannerReady && !running
+                      ? _retryFailedPhotos
+                      : null,
+                  icon: const Icon(Icons.refresh, size: 18),
+                  label: const Text('Retry failed'),
+                ),
+              if (scanner.records.isNotEmpty)
+                TextButton(
+                  onPressed: scannerReady && !running
+                      ? _clearScannedPhotos
+                      : null,
+                  child: const Text('Clear scan'),
+                ),
+            ],
+          ),
+        ],
       ),
     );
   }

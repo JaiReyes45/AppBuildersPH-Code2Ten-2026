@@ -14,19 +14,11 @@ Future<void> submit(WidgetTester tester, String text) async {
   await tester.enterText(find.byType(TextField), text);
   await tester.testTextInput.receiveAction(TextInputAction.search);
   await tester.pump();
-  await tester.pump(const Duration(milliseconds: 300));
-  await tester.scrollUntilVisible(
-    find.text('Let me look in the box…'),
-    -150,
-    scrollable: pageScroll,
-  );
-  expect(find.text('Let me look in the box…'), findsOneWidget);
-  await tester.pump(const Duration(seconds: 2));
   await tester.pumpAndSettle();
 }
 
 void main() {
-  testWidgets('search animates then presents source evidence', (tester) async {
+  testWidgets('AI core search presents source evidence', (tester) async {
     await tester.pumpWidget(const GalleryHelpdeskApp());
     await submit(tester, 'headphones');
     expect(find.text('Ta-da! Here’s what I found.'), findsOneWidget);
@@ -35,6 +27,8 @@ void main() {
       150,
       scrollable: pageScroll,
     );
+    await tester.ensureVisible(find.text('Wireless headphones'));
+    await tester.pumpAndSettle();
     expect(find.text('GCash · Lunch payment'), findsNothing);
     await tester.tap(find.text('Wireless headphones'));
     await tester.pumpAndSettle();
@@ -67,21 +61,24 @@ void main() {
     );
     expect(find.text('Wireless headphones'), findsOneWidget);
   });
-  testWidgets('cancel ignores late search completion', (tester) async {
+  testWidgets('AI response is shown with source-backed details', (
+    tester,
+  ) async {
     await tester.pumpWidget(const GalleryHelpdeskApp());
-    await tester.enterText(find.byType(TextField), 'headphones');
-    await tester.testTextInput.receiveAction(TextInputAction.search);
-    await tester.pump();
+    await submit(tester, 'headphones');
     await tester.scrollUntilVisible(
-      find.text('Cancel search'),
-      100,
+      find.text('Evidence-based answer'),
+      150,
       scrollable: pageScroll,
     );
-    await tester.tap(find.text('Cancel search'));
-    await tester.pump(const Duration(seconds: 2));
-    await tester.pumpAndSettle();
-    expect(find.text('Ta-da! Here’s what I found.'), findsNothing);
-    expect(find.text('A little help finding\nwhat you saved.'), findsOneWidget);
+    expect(find.text('Evidence-based answer'), findsOneWidget);
+    expect(find.textContaining('DEMO-ORDER-1028'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('Wireless headphones'),
+      150,
+      scrollable: pageScroll,
+    );
+    expect(find.text('Wireless headphones'), findsOneWidget);
   });
   testWidgets('narrow screen and large text remain scrollable', (tester) async {
     tester.view.physicalSize = const Size(360, 800);

@@ -28,7 +28,7 @@ class FieldExtractor {
       r'Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|'
       r'Nov(?:ember)?|Dec(?:ember)?)(?:\s+\d{4})?)';
   static final RegExp _deadlinePattern = RegExp(
-    '\\b(?:due(?:\\s+date)?|deadline|submit\\s+by|submission\\s+date)'
+    '\\b(?:due(?:\\s+date)?|deadline|submit\\b.{0,80}?\\bby|submission\\s+date)'
     '\\s*(?::|-|is|on|by)?\\s*($_date)',
     caseSensitive: false,
   );
@@ -45,10 +45,23 @@ class FieldExtractor {
     r'^\s*(?:item|product)\s*:\s*(.+?)\s*$',
     caseSensitive: false,
   );
+  static final RegExp _referenceLabelOnlyPattern = RegExp(
+    r'^\s*(?:reference|ref)(?:\s*(?:no\.?|number|#))?\s*[:#-]?\s*$',
+    caseSensitive: false,
+  );
+  static final RegExp _orderLabelOnlyPattern = RegExp(
+    r'^\s*order\s*(?:id|no\.?|number|#)\s*[:#-]?\s*$',
+    caseSensitive: false,
+  );
+  static final RegExp _identifierValuePattern = RegExp(
+    r'^\s*([A-Z0-9][A-Z0-9-]{3,})\s*$',
+    caseSensitive: false,
+  );
 
   List<ExtractedField> extract(List<OcrBlock> blocks) {
     final fields = <ExtractedField>[];
-    for (final block in blocks) {
+    for (var index = 0; index < blocks.length; index++) {
+      final block = blocks[index];
       _addMatches(
         fields,
         block,
@@ -88,8 +101,45 @@ class FieldExtractor {
         _itemPattern,
         ExtractedFieldType.itemName,
       );
+      if (index + 1 < blocks.length) {
+        _addSplitIdentifier(
+          fields,
+          block,
+          blocks[index + 1],
+          _referenceLabelOnlyPattern,
+          ExtractedFieldType.referenceNumber,
+        );
+        _addSplitIdentifier(
+          fields,
+          block,
+          blocks[index + 1],
+          _orderLabelOnlyPattern,
+          ExtractedFieldType.orderNumber,
+        );
+      }
     }
     return List.unmodifiable(_deduplicate(fields));
+  }
+
+  void _addSplitIdentifier(
+    List<ExtractedField> target,
+    OcrBlock labelBlock,
+    OcrBlock valueBlock,
+    RegExp labelPattern,
+    ExtractedFieldType type,
+  ) {
+    if (!labelPattern.hasMatch(labelBlock.text)) return;
+    final match = _identifierValuePattern.firstMatch(valueBlock.text);
+    final value = match?.group(1);
+    if (value == null) return;
+    target.add(
+      ExtractedField(
+        type: type,
+        rawValue: value,
+        normalizedValue: value.toLowerCase(),
+        sourceBlockIds: [labelBlock.id, valueBlock.id],
+      ),
+    );
   }
 
   void _addMatches(
@@ -100,9 +150,7 @@ class FieldExtractor {
     String Function(String value)? normalize,
   }) {
     for (final match in pattern.allMatches(block.text)) {
-      final value = match.groupCount > 0 && match.group(1) != null
-          ? match.group(1)!.trim()
-          : match.group(0)!.trim();
+      final value = _firstCapturedValue(match) ?? match.group(0)!.trim();
       target.add(
         ExtractedField(
           type: type,
@@ -114,6 +162,14 @@ class FieldExtractor {
         ),
       );
     }
+  }
+
+  String? _firstCapturedValue(RegExpMatch match) {
+    for (var group = 1; group <= match.groupCount; group++) {
+      final value = match.group(group)?.trim();
+      if (value != null && value.isNotEmpty) return value;
+    }
+    return null;
   }
 
   void _addLabeledValue(

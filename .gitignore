@@ -22,6 +22,9 @@ key.properties
 *.apk
 *.aab
 private_samples/
+# Large model files - bundled ones go in assets/models/
+*.gguf
+*.tflite.bak
 local_models/
 .idea/
 *.iml

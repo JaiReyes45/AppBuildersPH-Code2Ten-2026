@@ -1,7 +1,15 @@
+import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:gallery_helpdesk_ai/gallery_helpdesk_ai.dart';
+import 'package:image_picker/image_picker.dart';
 
 import 'dart:math' as math;
+
+import 'evidence_image.dart';
+import 'gallery_scanner.dart';
+
 part 'home.dart';
 
 void main() => runApp(const GalleryHelpdeskApp());
@@ -32,6 +40,10 @@ class GalleryHelpdeskApp extends StatelessWidget {
 class Evidence {
   final String title, category, date, summary, field, value, source;
   final IconData icon;
+  final String? sourceScreenshotId;
+  final List<String> matchingBlockIds;
+  final String? sourceImagePath;
+  final bool isGallerySource;
   const Evidence(
     this.title,
     this.category,
@@ -40,7 +52,29 @@ class Evidence {
     this.field,
     this.value,
     this.source,
-    this.icon,
+    this.icon, {
+    this.sourceScreenshotId,
+    this.matchingBlockIds = const [],
+    this.sourceImagePath,
+    this.isGallerySource = false,
+  });
+
+  Evidence withSourceMatches({
+    required String screenshotId,
+    required List<String> blockIds,
+  }) => Evidence(
+    title,
+    category,
+    date,
+    summary,
+    field,
+    value,
+    source,
+    icon,
+    sourceScreenshotId: screenshotId,
+    matchingBlockIds: blockIds,
+    sourceImagePath: sourceImagePath,
+    isGallerySource: isGallerySource,
   );
 }
 
@@ -108,7 +142,11 @@ class DetailScreen extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 8),
-            Text('${evidence.category} · Fictional demo content'),
+            Text(
+              evidence.isGallerySource
+                  ? '${evidence.category} · Scanned on this device'
+                  : '${evidence.category} · Fictional demo content',
+            ),
             const SizedBox(height: 24),
             Container(
               padding: const EdgeInsets.all(20),
@@ -139,7 +177,13 @@ class DetailScreen extends StatelessWidget {
                       );
                       if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Sample detail copied')),
+                          SnackBar(
+                            content: Text(
+                              evidence.isGallerySource
+                                  ? 'Detail copied'
+                                  : 'Sample detail copied',
+                            ),
+                          ),
                         );
                       }
                     },
@@ -153,11 +197,22 @@ class DetailScreen extends StatelessWidget {
               style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 6),
-            const Text(
-              'Recreated sample, not an image from your gallery.',
-              style: TextStyle(fontSize: 12, color: Colors.black54),
+            Text(
+              evidence.isGallerySource
+                  ? 'Private copy of the permitted gallery image.'
+                  : 'Recreated sample, not an image from your gallery.',
+              style: const TextStyle(fontSize: 12, color: Colors.black54),
             ),
             const SizedBox(height: 12),
+            if (evidence.sourceImagePath case final imagePath?) ...[
+              Container(
+                constraints: const BoxConstraints(maxHeight: 420),
+                width: double.infinity,
+                color: Colors.white,
+                child: evidenceImage(imagePath),
+              ),
+              const SizedBox(height: 12),
+            ],
             Container(
               padding: const EdgeInsets.all(24),
               decoration: BoxDecoration(
@@ -170,13 +225,22 @@ class DetailScreen extends StatelessWidget {
                   style: const TextStyle(color: ink, fontSize: 16, height: 1.8),
                   children: evidence.source
                       .split('\n')
+                      .asMap()
+                      .entries
                       .map(
                         (line) => TextSpan(
-                          text: '$line\n',
+                          text: '${line.value}\n',
                           style:
-                              line.contains(evidence.value) ||
-                                  (evidence.category == 'Announcements' &&
-                                      line.contains('October 12'))
+                              evidence.matchingBlockIds.contains(
+                                    '${evidence.sourceScreenshotId}-block-${line.key}',
+                                  ) ||
+                                  evidence.matchingBlockIds.isEmpty &&
+                                      (line.value.contains(evidence.value) ||
+                                          (evidence.category ==
+                                                  'Announcements' &&
+                                              line.value.contains(
+                                                'October 12',
+                                              )))
                               ? const TextStyle(
                                   backgroundColor: Color(0xFFFFEDAC),
                                   fontWeight: FontWeight.w700,

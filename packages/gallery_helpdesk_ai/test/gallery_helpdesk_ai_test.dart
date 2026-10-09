@@ -41,6 +41,71 @@ void main() {
     });
 
     test(
+      'normalizes currency suffix amounts without changing raw OCR text',
+      () {
+        final receipt = pipeline.analyze(
+          const OcrScreenshot(
+            screenshotId: 'receipt-suffix',
+            blocks: [
+              OcrBlock(id: 's1', text: 'GCash payment successful'),
+              OcrBlock(id: 's2', text: '500 PHP'),
+            ],
+          ),
+        );
+        final amount = receipt.fields.singleWhere(
+          (field) => field.type == ExtractedFieldType.amount,
+        );
+        expect(amount.rawValue, '500 PHP');
+        expect(amount.normalizedValue, '500.00');
+        expect(pipeline.parseQuery('GCash receipt 500 PHP').amount, '500.00');
+      },
+    );
+
+    test(
+      'preserves provenance when an identifier label and value are split',
+      () {
+        final receipt = pipeline.analyze(
+          const OcrScreenshot(
+            screenshotId: 'receipt-split',
+            blocks: [
+              OcrBlock(id: 'label', text: 'Reference No.'),
+              OcrBlock(id: 'value', text: 'R-123456'),
+            ],
+          ),
+        );
+        final reference = receipt.fields.singleWhere(
+          (field) => field.type == ExtractedFieldType.referenceNumber,
+        );
+        expect(reference.rawValue, 'R-123456');
+        expect(reference.sourceBlockIds, ['label', 'value']);
+    });
+
+    test('searching a split identifier cites both OCR blocks', () async {
+        final receipt = pipeline.analyze(
+          const OcrScreenshot(
+            screenshotId: 'receipt-split',
+            blocks: [
+              OcrBlock(id: 'g1', text: 'GCash transaction successful'),
+              OcrBlock(id: 'g2', text: 'Reference No.'),
+              OcrBlock(id: 'g3', text: 'R-123456'),
+            ],
+          ),
+        );
+
+        final answer = await pipeline.answer(
+          'What is the reference number?',
+          [receipt],
+        );
+
+        expect(answer.sources, hasLength(1));
+        expect(
+          answer.sources.single.matchingBlockIds,
+          containsAll(['g2', 'g3']),
+        );
+      },
+    );
+
+    test(
       'classifies order and announcement candidates without inventing data',
       () {
         final order = pipeline.analyze(
@@ -68,7 +133,10 @@ void main() {
             screenshotId: 'announcement-1',
             blocks: [
               OcrBlock(id: 'a1', text: 'Title: Research Proposal'),
-              OcrBlock(id: 'a2', text: 'Deadline: October 15, 2026'),
+              OcrBlock(
+                id: 'a2',
+                text: 'Please submit your research proposal by October 15, 2026 at 5 PM.',
+              ),
               OcrBlock(id: 'a3', text: 'Announcement for students'),
             ],
           ),
@@ -149,6 +217,68 @@ void main() {
       expect(answer.sources.single.matchingBlockIds, contains('r2'));
       expect(answer.text, contains('not verified payment status'));
       expect(answer.text, contains('PHP 500'));
+    });
+
+    test('requires amount and identifier filters to both match', () async {
+      final rightReceipt = pipeline.analyze(
+        const OcrScreenshot(
+          screenshotId: 'right',
+          blocks: [
+            OcrBlock(id: 'r1', text: 'GCash payment successful'),
+            OcrBlock(id: 'r2', text: '500 PHP'),
+            OcrBlock(id: 'r3', text: 'Reference No: REF-55555'),
+          ],
+        ),
+      );
+      final amountOnly = pipeline.analyze(
+        const OcrScreenshot(
+          screenshotId: 'amount-only',
+          blocks: [
+            OcrBlock(id: 'a1', text: 'GCash payment successful'),
+            OcrBlock(id: 'a2', text: '500 PHP'),
+            OcrBlock(id: 'a3', text: 'Reference No: REF-99999'),
+          ],
+        ),
+      );
+      final identifierOnly = pipeline.analyze(
+        const OcrScreenshot(
+          screenshotId: 'identifier-only',
+          blocks: [
+            OcrBlock(id: 'i1', text: 'GCash payment successful'),
+            OcrBlock(id: 'i2', text: '800 PHP'),
+            OcrBlock(id: 'i3', text: 'Reference No: REF-55555'),
+          ],
+        ),
+      );
+
+      final answer = await pipeline.answer(
+        'Find GCash reference number REF-55555 for PHP 500',
+        [amountOnly, identifierOnly, rightReceipt],
+      );
+
+      expect(answer.sources, hasLength(1));
+      expect(answer.sources.single.screenshot.screenshotId, 'right');
+      expect(answer.sources.single.matchingBlockIds, containsAll(['r2', 'r3']));
+    });
+
+    test('rejects weak partial keyword matches', () async {
+      final partial = pipeline.analyze(
+        const OcrScreenshot(
+          screenshotId: 'partial',
+          blocks: [
+            OcrBlock(id: 'p1', text: 'Class announcement'),
+            OcrBlock(id: 'p2', text: 'Research deadline is October 15, 2026'),
+          ],
+        ),
+      );
+
+      final answer = await pipeline.answer(
+        'When is the research proposal due?',
+        [partial],
+      );
+
+      expect(answer.sources, isEmpty);
+      expect(answer.text, contains('could not find matching evidence'));
     });
 
     test(

@@ -36,7 +36,10 @@ class SearchService {
           query.keywords.isNotEmpty &&
           query.amount == null &&
           query.exactIdentifier == null;
-      if (requiresKeywordHit && keywordHits == 0) continue;
+      // Requiring two-thirds coverage avoids returning a screenshot for one
+      // incidental word in a multi-term request.
+      final minimumKeywordHits = (query.keywords.length * 2 + 2) ~/ 3;
+      if (requiresKeywordHit && keywordHits < minimumKeywordHits) continue;
 
       final citedFields = <ExtractedField>[
         ...fieldMatches,
@@ -72,27 +75,32 @@ class SearchService {
     HelpdeskQuery query,
     AnalyzedScreenshot screenshot,
   ) {
+    final matching = <ExtractedField>[];
     if (query.exactIdentifier != null) {
       final requiredType =
           query.exactIdentifierType == ExactIdentifierType.orderNumber
           ? ExtractedFieldType.orderNumber
           : ExtractedFieldType.referenceNumber;
       final exact = _normalizeIdentifier(query.exactIdentifier!);
-      return screenshot.fields.where((field) {
+      final exactMatches = screenshot.fields.where((field) {
         final value = field.normalizedValue ?? field.rawValue;
         return field.type == requiredType &&
             _normalizeIdentifier(value) == exact;
       }).toList();
+      if (exactMatches.isEmpty) return const [];
+      matching.addAll(exactMatches);
     }
 
     if (query.amount != null) {
-      return screenshot.fields.where((field) {
+      final amountMatches = screenshot.fields.where((field) {
         if (field.type != ExtractedFieldType.amount) return false;
         final value = field.normalizedValue;
         return value != null && value == query.amount;
       }).toList();
+      if (amountMatches.isEmpty) return const [];
+      matching.addAll(amountMatches);
     }
-    return const [];
+    return matching;
   }
 
   List<ExtractedField> _fieldsForAnswer(

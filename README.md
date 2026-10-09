@@ -2,7 +2,7 @@
 
 **Gallery Helpdesk** — an offline Android assistant that scans the user's permitted local gallery to find order numbers, GCash receipt details, and student announcements, and answers requests with linked screenshot evidence.
 
-> Status: planning repository. The Flutter application has not been implemented yet. Features below are acceptance criteria, not claims of completed functionality.
+> Status: the Flutter application is not implemented yet. An initial standalone Dart AI core is in `packages/gallery_helpdesk_ai`; gallery/OCR/storage adapters and conditional model integrations remain pending. Features below are acceptance criteria, not claims of completed app functionality.
 
 **Deadline:** Saturday, October 10, 2026, 10:00 AM, Asia/Manila (UTC+8).
 
@@ -60,7 +60,7 @@ No server, API key, Firebase, hosted vector database, or runtime inference reque
 
 Permission -> paged gallery enumeration -> bounded scan queue -> app-owned local copy for indexed evidence -> OCR -> category/field candidates -> ObjectBox -> optional embeddings -> helpdesk query -> filtered/ranked retrieval -> source-linked response -> source view -> optional confirmed reminder.
 
-The app reads OS-authorized media assets; it does not automate the gallery application's UI. See [HELPDESK_PLAN.md](HELPDESK_PLAN.md) for query handling, field extraction, reliability checks, and model responsibilities.
+The app reads OS-authorized media assets; it does not automate the gallery application's UI. See [HELPDESK_PLAN.md](HELPDESK_PLAN.md) for query handling, field extraction, reliability checks, and model responsibilities. The initial pure-Dart AI core is in [packages/gallery_helpdesk_ai/](packages/gallery_helpdesk_ai/README.md); it handles candidate classification/extraction, basic query parsing, evidence retrieval, and deterministic source-linked responses. It does not yet run OCR or integrate Gemma/embeddings.
 
 Keep native plugin work in its supported execution context. Run CPU ranking off the UI thread when needed; do not assume every native plugin can run in an arbitrary Dart isolate.
 

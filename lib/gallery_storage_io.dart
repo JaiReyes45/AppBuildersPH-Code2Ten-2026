@@ -3,19 +3,49 @@ import 'dart:io';
 
 import 'package:path_provider/path_provider.dart';
 
+import 'data/objectbox_gallery_storage.dart';
+import 'data/objectbox_store.dart';
 import 'gallery_storage_api.dart';
 
 Future<GalleryStorage> createGalleryStorage() async {
   final documents = await getApplicationDocumentsDirectory();
-  final storage = _FileGalleryStorage(
-    Directory('${documents.path}${Platform.pathSeparator}gallery_helpdesk'),
+  final root = Directory(
+    '${documents.path}${Platform.pathSeparator}gallery_helpdesk',
   );
-  await storage.initialize();
-  return storage;
+  await root.create(recursive: true);
+  await Directory('${root.path}${Platform.pathSeparator}images')
+      .create(recursive: true);
+  final store = await ObjectBoxStore.open();
+  try {
+    final storage = ObjectBoxGalleryStorage(store, root);
+    await storage.migrateLegacyData();
+    return storage;
+  } catch (_) {
+    await store.close();
+    rethrow;
+  }
 }
 
+// Retained unchanged as the legacy storage implementation.
+// ignore: unused_element
 class _FileGalleryStorage implements GalleryStorage {
   _FileGalleryStorage(this.root);
+
+  @override
+  Future<int> count() async => (await allAssetIds()).length;
+
+  @override
+  Future<Set<String>> allAssetIds() async => (await loadRecords())
+      .where((record) => record['status'] != 'failed')
+      .map((record) => record['assetId'] as String).toSet();
+
+  // This legacy implementation is no longer selected by the factory.
+  @override
+  Future<void> upsertCoverage(DateTimeRange range, int addedCount) async {}
+
+  @override
+  Future<int> coverageCount(DateTimeRange? range) async =>
+      range == null ? await count() : 0;
 
   final Directory root;
 

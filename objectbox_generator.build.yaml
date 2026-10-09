@@ -1,0 +1,27 @@
+# ObjectBox 4.3.1 enables its resolver on its own package. Those sources pull
+# newer SDK syntax into the pinned analyzer. Only our entity file needs resolving.
+# Keep the upstream builder definitions, disabling the package's self-build.
+targets:
+  $default:
+    builders:
+      objectbox_generator:resolver:
+        enabled: false
+      objectbox_generator:generator:
+        enabled: false
+
+builders:
+  resolver:
+    import: "package:objectbox_generator/objectbox_generator.dart"
+    builder_factories: ["entityResolverFactory"]
+    build_extensions: {'.dart': ['.objectbox.info']}
+    auto_apply: dependents
+    build_to: cache
+  generator:
+    import: "package:objectbox_generator/objectbox_generator.dart"
+    builder_factories: ["codeGeneratorFactory"]
+    build_extensions:
+      "$lib$": ["objectbox.g.dart"]
+      "$test$": ["objectbox.g.dart"]
+    required_inputs: ['.objectbox.info']
+    auto_apply: dependents
+    build_to: source

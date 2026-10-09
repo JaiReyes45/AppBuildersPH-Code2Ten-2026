@@ -3,6 +3,18 @@ import 'gallery_storage_api.dart';
 Future<GalleryStorage> createGalleryStorage() async => _MemoryGalleryStorage();
 
 class _MemoryGalleryStorage implements GalleryStorage {
+  @override
+  Future<int> count() async => 0;
+
+  @override
+  Future<Set<String>> allAssetIds() async => {};
+
+  @override
+  Future<void> upsertCoverage(DateTimeRange range, int addedCount) async {}
+
+  @override
+  Future<int> coverageCount(DateTimeRange? range) async => 0;
+
   final Map<String, Map<String, dynamic>> _records = {};
   Map<String, dynamic>? _progress;
 

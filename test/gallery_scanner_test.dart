@@ -75,6 +75,21 @@ void main() {
 }
 
 class _MemoryGalleryStorage implements GalleryStorage {
+  @override
+  Future<int> count() async => (await allAssetIds()).length;
+
+  @override
+  Future<Set<String>> allAssetIds() async => records.values
+      .where((record) => record['status'] != 'failed')
+      .map((record) => record['assetId'] as String)
+      .toSet();
+
+  @override
+  Future<void> upsertCoverage(DateTimeRange range, int addedCount) async {}
+
+  @override
+  Future<int> coverageCount(DateTimeRange? range) async => 0;
+
   final Map<String, Map<String, dynamic>> records = {};
   Map<String, dynamic>? progress;
 

@@ -4,6 +4,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:photo_manager/photo_manager.dart';
 
 import 'gallery_storage.dart';
+import 'gallery_asset_source.dart';
 
 const _pageSize = 24;
 
@@ -58,6 +59,7 @@ class GalleryScanRecord {
     required this.blocks,
     this.imagePath,
     this.error,
+    this.assetCreatedAt,
   });
 
   final String assetId;
@@ -67,11 +69,11 @@ class GalleryScanRecord {
   final List<GalleryScanBlock> blocks;
   final String? imagePath;
   final String? error;
+  final DateTime? assetCreatedAt;
 
   bool get isFailed => status == 'failed';
 
-  String get recognizedText =>
-      blocks.map((block) => block.text).join('\n');
+  String get recognizedText => blocks.map((block) => block.text).join('\n');
 
   Map<String, Object?> toJson() => {
     'assetId': assetId,
@@ -81,6 +83,8 @@ class GalleryScanRecord {
     'imagePath': imagePath,
     'error': error,
     'blocks': blocks.map((block) => block.toJson()).toList(),
+    if (assetCreatedAt != null)
+      'assetCreatedAt': assetCreatedAt!.toIso8601String(),
   };
 
   factory GalleryScanRecord.fromJson(Map<String, dynamic> json) =>
@@ -91,6 +95,9 @@ class GalleryScanRecord {
         scannedAt: DateTime.parse(json['scannedAt'] as String),
         imagePath: json['imagePath'] as String?,
         error: json['error'] as String?,
+        assetCreatedAt: json['assetCreatedAt'] == null
+            ? null
+            : DateTime.parse(json['assetCreatedAt'] as String),
         blocks: (json['blocks'] as List<dynamic>)
             .map(
               (block) => GalleryScanBlock.fromJson(
@@ -109,6 +116,7 @@ class GalleryScanProgress {
     this.processed = 0,
     this.failed = 0,
     this.pendingPickedPhotos = const [],
+    this.hasMore = false,
   });
 
   final String status;
@@ -117,6 +125,9 @@ class GalleryScanProgress {
   final int processed;
   final int failed;
   final List<PendingPickedPhoto> pendingPickedPhotos;
+
+  /// Whether this bounded pass observed another eligible asset.
+  final bool hasMore;
 
   bool get isScanning => status == 'scanning';
   double? get fraction => total == 0 ? null : (processed / total).clamp(0, 1);
@@ -144,12 +155,11 @@ class GalleryScanProgress {
         )
         .toList(growable: false);
     return GalleryScanProgress(
-    status: json['status'] as String? ?? 'idle',
-    message:
-        json['message'] as String? ?? 'No gallery photos scanned yet.',
-    total: (json['total'] as num?)?.toInt() ?? 0,
-    processed: (json['processed'] as num?)?.toInt() ?? 0,
-    failed: failed,
+      status: json['status'] as String? ?? 'idle',
+      message: json['message'] as String? ?? 'No gallery photos scanned yet.',
+      total: (json['total'] as num?)?.toInt() ?? 0,
+      processed: (json['processed'] as num?)?.toInt() ?? 0,
+      failed: failed,
       pendingPickedPhotos: pending,
     );
   }
@@ -187,8 +197,233 @@ class PendingPickedPhoto {
 }
 
 class GalleryScanner {
-  GalleryScanner({GalleryStorage? initialStorage})
-    : _storage = initialStorage;
+  GalleryScanner({
+    GalleryStorage? initialStorage,
+    GalleryAssetSource? assetSource,
+  }) : _storage = initialStorage,
+       _assetSource = assetSource ?? GalleryAssetSource();
+
+  final GalleryAssetSource _assetSource;
+  Future<void>? _initialization;
+  bool _cancelRequested = false;
+  bool get isSupported => isGalleryScanningSupported;
+  bool get isRunning => _running;
+
+  void cancelScan() => _cancelRequested = true;
+
+  Future<int> countIndexed() async {
+    await initialize();
+    return _storage!.count();
+  }
+
+  Future<Set<String>> indexedAssetIds() async {
+    await initialize();
+    return _storage!.allAssetIds();
+  }
+
+  Future<int> coverageForRange(DateTimeRange? range) async {
+    await initialize();
+    return _storage!.coverageCount(range);
+  }
+
+  Future<List<AssetEntity>> fetchUnindexedAssets({
+    required int limit,
+    DateTimeRange? dateFilter,
+    Set<String> excludeAssetIds = const {},
+  }) async {
+    if (limit <= 0) return [];
+    final indexed = await indexedAssetIds();
+    final result = <AssetEntity>[];
+    final seen = <String>{};
+    const metadataPageSize = 100;
+    for (var page = 0; !_cancelRequested; page++) {
+      final assets = await _assetSource.page(
+        page: page,
+        size: metadataPageSize,
+        range: dateFilter,
+      );
+      for (final asset in assets) {
+        if (asset.type != AssetType.image ||
+            !seen.add(asset.id) ||
+            indexed.contains(asset.id) ||
+            excludeAssetIds.contains(asset.id)) {
+          continue;
+        }
+        final created = asset.createDateTime;
+        if (dateFilter != null &&
+            (created.isBefore(dateFilter.start) ||
+                created.isAfter(dateFilter.end))) {
+          continue;
+        }
+        result.add(asset);
+      }
+      // Native paging is explicitly ordered by creation time DESC.
+      if (result.length >= limit || assets.length < metadataPageSize) break;
+    }
+    result.sort((a, b) => b.createDateTime.compareTo(a.createDateTime));
+    return result.take(limit).toList(growable: false);
+  }
+
+  Future<void> scanSingleAsset(AssetEntity asset) async {
+    try {
+      final image = await asset.file;
+      if (image == null) {
+        await _saveFailed(
+          asset.id,
+          asset.title ?? 'Gallery image',
+          'The gallery did not provide an image file.',
+          null,
+          assetCreatedAt: asset.createDateTime,
+        );
+      } else {
+        await _processImage(
+          asset.id,
+          asset.title ?? 'Gallery image',
+          image.path,
+          assetCreatedAt: asset.createDateTime,
+        );
+      }
+    } catch (error) {
+      await _saveFailed(
+        asset.id,
+        asset.title ?? 'Gallery image',
+        error.toString(),
+        null,
+        assetCreatedAt: asset.createDateTime,
+      );
+    }
+  }
+
+  Stream<GalleryScanProgress> scanUpTo({
+    required int additionalCount,
+    DateTimeRange? dateFilter,
+    Set<String>? attemptedAssetIds,
+  }) async* {
+    if (additionalCount <= 0) throw ArgumentError.value(additionalCount);
+    await initialize();
+    if (_running) {
+      yield GalleryScanProgress(
+        status: 'busy',
+        message: 'Another scan is running. Try again when it finishes.',
+        failed: failedCount,
+      );
+      return;
+    }
+    if (!isSupported) {
+      yield const GalleryScanProgress(
+        status: 'unsupported',
+        message: 'Gallery scanning is available on Android/iOS.',
+      );
+      return;
+    }
+    if (_progress.pendingPickedPhotos.isNotEmpty) {
+      yield GalleryScanProgress(
+        status: 'pendingSelection',
+        message: 'Resume selected photos before scanning more gallery photos.',
+        pendingPickedPhotos: _progress.pendingPickedPhotos,
+      );
+      return;
+    }
+    _running = true;
+    _cancelRequested = false;
+    var processed = 0;
+    var added = 0;
+    var hasMore = false;
+    final attempted = attemptedAssetIds ?? <String>{};
+    try {
+      if (!await _assetSource.requestPermission()) {
+        await _publish(
+          GalleryScanProgress(
+            status: 'permissionDenied',
+            message:
+                'Photo access was not granted. Choose specific photos instead.',
+            failed: failedCount,
+          ),
+        );
+        yield _progress;
+        return;
+      }
+      // Coverage is informational: a global count must never suppress a
+      // different date range, or an explicit request to scan more images.
+      await coverageForRange(dateFilter);
+      final before = await indexedAssetIds();
+      final candidates = await fetchUnindexedAssets(
+        limit: additionalCount + 1,
+        dateFilter: dateFilter,
+        excludeAssetIds: attempted,
+      );
+      hasMore = candidates.length > additionalCount;
+      final assets = candidates.take(additionalCount).toList();
+      await _publish(
+        GalleryScanProgress(
+          status: 'scanning',
+          message: 'Scanning on this device...',
+          total: assets.length,
+          failed: failedCount,
+          hasMore: hasMore,
+        ),
+      );
+      yield _progress;
+      for (final asset in assets) {
+        if (_cancelRequested) break;
+        attempted.add(asset.id);
+        await scanSingleAsset(asset);
+        processed++;
+        final successful = await indexedAssetIds();
+        if (!before.contains(asset.id) && successful.contains(asset.id)) {
+          added++;
+        }
+        await _publish(
+          GalleryScanProgress(
+            status: 'scanning',
+            message: 'Scanning on this device...',
+            total: assets.length,
+            processed: processed,
+            failed: failedCount,
+            hasMore: hasMore,
+          ),
+        );
+        yield _progress;
+      }
+      await _publish(
+        GalleryScanProgress(
+          status: _cancelRequested ? 'cancelled' : 'ready',
+          message: _cancelRequested
+              ? 'Search cancelled. Indexed photos are saved.'
+              : assets.isEmpty
+              ? 'No more unindexed photos in this range.'
+              : 'Ready',
+          total: assets.length,
+          processed: processed,
+          failed: failedCount,
+          hasMore: hasMore || processed < assets.length,
+        ),
+      );
+      yield _progress;
+    } catch (error) {
+      await _publish(
+        GalleryScanProgress(
+          status: 'error',
+          message: 'Gallery scan stopped: $error',
+          processed: processed,
+          failed: failedCount,
+        ),
+      );
+      yield _progress;
+    } finally {
+      try {
+        if (dateFilter != null && added > 0) {
+          await _storage!.upsertCoverage(dateFilter, added);
+        }
+      } finally {
+        try {
+          await _closeRecognizer();
+        } finally {
+          _running = false;
+        }
+      }
+    }
+  }
 
   GalleryStorage? _storage;
   final Map<String, GalleryScanRecord> _records = {};
@@ -206,9 +441,12 @@ class GalleryScanner {
   }
 
   GalleryScanProgress get progress => _progress;
-  int get failedCount => _records.values.where((record) => record.isFailed).length;
+  int get failedCount =>
+      _records.values.where((record) => record.isFailed).length;
 
-  Future<void> initialize() async {
+  Future<void> initialize() => _initialization ??= _initialize();
+
+  Future<void> _initialize() async {
     _storage ??= await createGalleryStorage();
     final savedRecords = await _storage!.loadRecords();
     for (final json in savedRecords) {
@@ -217,10 +455,7 @@ class GalleryScanner {
     }
     final savedProgress = await _storage!.loadProgress();
     if (savedProgress == null) {
-      await _publish(
-        const GalleryScanProgress(failed: 0),
-        persist: false,
-      );
+      await _publish(const GalleryScanProgress(failed: 0), persist: false);
       return;
     }
     final restored = GalleryScanProgress.fromJson(
@@ -230,7 +465,8 @@ class GalleryScanner {
     if (restored.isScanning) {
       _progress = GalleryScanProgress(
         status: 'interrupted',
-        message: 'The previous scan stopped. Resume to continue where it left off.',
+        message:
+            'The previous scan stopped. Resume to continue where it left off.',
         total: restored.total,
         processed: restored.processed,
         failed: failedCount,
@@ -261,7 +497,8 @@ class GalleryScanner {
         await _publish(
           GalleryScanProgress(
             status: 'permissionDenied',
-            message: 'Photo access was not granted. Choose specific photos instead.',
+            message:
+                'Photo access was not granted. Choose specific photos instead.',
             processed: 0,
             total: 0,
             failed: failedCount,
@@ -302,31 +539,8 @@ class GalleryScanner {
         if (assets.isEmpty) break;
         for (final asset in assets) {
           final existing = _records[asset.id];
-          if (existing == null) {
-            try {
-              final image = await asset.file;
-              if (image == null) {
-                await _saveFailed(
-                  asset.id,
-                  asset.title ?? 'Gallery image',
-                  'The gallery did not provide an image file.',
-                  null,
-                );
-              } else {
-                await _processImage(
-                  asset.id,
-                  asset.title ?? 'Gallery image',
-                  image.path,
-                );
-              }
-            } catch (error) {
-              await _saveFailed(
-                asset.id,
-                asset.title ?? 'Gallery image',
-                error.toString(),
-                null,
-              );
-            }
+          if (existing == null || existing.isFailed) {
+            await scanSingleAsset(asset);
           }
           processed++;
           await _publish(
@@ -343,7 +557,8 @@ class GalleryScanner {
       await _publish(
         GalleryScanProgress(
           status: 'complete',
-          message: 'Scan complete. $processed photos checked; $failedCount need retry.',
+          message:
+              'Scan complete. $processed photos checked; $failedCount need retry.',
           total: total,
           processed: processed,
           failed: failedCount,
@@ -549,6 +764,7 @@ class GalleryScanner {
             record.assetId,
             record.displayName,
             path,
+            assetCreatedAt: record.assetCreatedAt,
           );
         }
         processed++;
@@ -590,22 +806,22 @@ class GalleryScanner {
 
   Future<void> clear() async {
     if (_running) {
-      throw StateError('Wait for the current scan to finish before clearing it.');
+      throw StateError(
+        'Wait for the current scan to finish before clearing it.',
+      );
     }
     await _closeRecognizer();
     await _storage!.clear();
     _records.clear();
-    await _publish(
-      const GalleryScanProgress(failed: 0),
-      persist: false,
-    );
+    await _publish(const GalleryScanProgress(failed: 0), persist: false);
   }
 
   Future<void> _processImage(
     String assetId,
     String displayName,
-    String sourcePath,
-  ) async {
+    String sourcePath, {
+    DateTime? assetCreatedAt,
+  }) async {
     String? imagePath;
     try {
       imagePath = await _storage!.saveImage(assetId, sourcePath);
@@ -639,6 +855,7 @@ class GalleryScanner {
         scannedAt: DateTime.now(),
         imagePath: imagePath,
         blocks: List.unmodifiable(blocks),
+        assetCreatedAt: assetCreatedAt,
       );
       _records[assetId] = record;
       await _storage!.saveRecord(record.toJson());
@@ -649,6 +866,7 @@ class GalleryScanner {
         displayName,
         error.toString(),
         imagePath,
+        assetCreatedAt: assetCreatedAt,
       );
     }
   }
@@ -657,8 +875,9 @@ class GalleryScanner {
     String assetId,
     String displayName,
     String error,
-    String? imagePath,
-  ) async {
+    String? imagePath, {
+    DateTime? assetCreatedAt,
+  }) async {
     final record = GalleryScanRecord(
       assetId: assetId,
       displayName: displayName,
@@ -667,6 +886,7 @@ class GalleryScanner {
       imagePath: imagePath,
       error: error,
       blocks: const [],
+      assetCreatedAt: assetCreatedAt,
     );
     _records[assetId] = record;
     await _storage!.saveRecord(record.toJson());
@@ -682,8 +902,7 @@ class GalleryScanner {
     onProgress?.call(_progress);
   }
 
-  Future<void> _saveProgress() =>
-      _storage!.saveProgress(_progress.toJson());
+  Future<void> _saveProgress() => _storage!.saveProgress(_progress.toJson());
 
   Future<void> _closeRecognizer() async {
     final recognizer = _recognizer;
@@ -700,6 +919,7 @@ extension on GalleryScanProgress {
     int? processed,
     int? failed,
     List<PendingPickedPhoto>? pendingPickedPhotos,
+    bool? hasMore,
   }) => GalleryScanProgress(
     status: status ?? this.status,
     message: message ?? this.message,
@@ -707,5 +927,6 @@ extension on GalleryScanProgress {
     processed: processed ?? this.processed,
     failed: failed ?? this.failed,
     pendingPickedPhotos: pendingPickedPhotos ?? this.pendingPickedPhotos,
+    hasMore: hasMore ?? this.hasMore,
   );
 }

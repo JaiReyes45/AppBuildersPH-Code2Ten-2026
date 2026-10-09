@@ -3,7 +3,8 @@ part of 'main.dart';
 enum SearchPhase { idle, searching, found, uncertain }
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  const HomeScreen({super.key, this.scanner});
+  final GalleryScanner? scanner;
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
@@ -21,8 +22,16 @@ class _HomeScreenState extends State<HomeScreen> {
   final Map<String, Evidence> galleryEvidence = {};
   int request = 0;
   final GalleryHelpdeskAi ai = GalleryHelpdeskAi();
-  final GalleryScanner scanner = GalleryScanner();
+  late final GalleryScanner scanner = widget.scanner ?? GalleryScanner();
   final ImagePicker imagePicker = ImagePicker();
+  late final Future<void> _scannerInitialization;
+  final Map<String, AnalyzedScreenshot> _analyzedGallery = {};
+  bool scanning = false;
+  int scannedCount = 0;
+  int targetCount = 0;
+  String status = 'Search to scan photos on this device.';
+  bool _allowDeeper = false;
+  String _lastQuery = '';
 
   @override
   void initState() {
@@ -35,12 +44,14 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         if (record.isFailed) {
           galleryEvidence.remove(record.assetId);
+          _analyzedGallery.remove('gallery-${record.assetId}');
         } else {
           galleryEvidence[record.assetId] = _evidenceForRecord(record);
         }
       });
     };
-    unawaited(_initializeScanner());
+    _scannerInitialization = _initializeScanner();
+    unawaited(_scannerInitialization);
   }
 
   Future<void> _initializeScanner() async {
@@ -95,6 +106,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final analyzed = ai.analyze(
       OcrScreenshot(screenshotId: screenshotId, blocks: blocks),
     );
+    _analyzedGallery[screenshotId] = analyzed;
     final category = switch (analyzed.category) {
       HelpdeskCategory.gcashReceipt => 'Receipts',
       HelpdeskCategory.order => 'Orders',
@@ -173,19 +185,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Future<void> _scanGallery() async {
-    try {
-      final granted = await scanner.scanGallery();
-      if (!granted && mounted) {
-        _showScanMessage(
-          'Choose specific photos if you do not want to grant gallery access.',
-        );
-      }
-    } catch (error) {
-      _showScanMessage('Gallery scan failed: $error');
-    }
-  }
-
   Future<void> _choosePhotos() async {
     try {
       final images = await imagePicker.pickMultiImage();
@@ -238,9 +237,12 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) {
         setState(() {
           galleryEvidence.clear();
+          _analyzedGallery.clear();
           matches = [];
           answerText = null;
           phase = SearchPhase.idle;
+          _allowDeeper = false;
+          status = 'Search to scan photos on this device.';
         });
       }
     } catch (error) {
@@ -257,6 +259,9 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     request++;
+    scanner.cancelScan();
+    scanner.onRecord = null;
+    scanner.onProgress = null;
     query.dispose();
     page.dispose();
     super.dispose();
@@ -264,25 +269,147 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> search([String? suggestion]) async {
     if (suggestion != null) query.text = suggestion;
-    final input = query.text.trim();
-    if (input.isEmpty) return;
+    await handleSearch(query.text);
+  }
+
+  Future<void> handleSearch(String rawQuery, {int? additionalCount}) async {
+    if (rawQuery.trim().isEmpty ||
+        phase == SearchPhase.searching ||
+        scanner.isRunning) {
+      return;
+    }
     FocusScope.of(context).unfocus();
     final ticket = ++request;
+    final manual = additionalCount != null;
+    final now = DateTime.now();
+    final normalized = normalizeAmountWords(rawQuery.trim());
+    final dateHint = parseDateHint(rawQuery, now: now);
+    final parsed = ai.parseQuery(queryWithoutDateHint(normalized, now: now));
     setState(() {
       phase = SearchPhase.searching;
       category = 'All';
+      answerText = null;
+      matches = [];
+      _allowDeeper = false;
+      _lastQuery = rawQuery;
+      status = 'Checking indexed photos...';
     });
-    if (page.hasClients) {
-      page.jumpTo(0);
+    if (page.hasClients) page.jumpTo(0);
+    try {
+      await _scannerInitialization;
+      if (!mounted || ticket != request) return;
+      var outcome = await _searchWith(parsed, dateHint);
+      if (!mounted || ticket != request) return;
+      // A cached gallery hit answers immediately; demo hits never stop scans.
+      if (!manual && outcome.galleryMatches.isNotEmpty) {
+        _showResults(
+          outcome,
+          parsed,
+          allowDeeper: scanner.isSupported,
+          message: 'Ready — showing indexed photos.',
+        );
+        return;
+      }
+      if (!scanner.isSupported || scannerError != null) {
+        _showResults(
+          outcome,
+          parsed,
+          allowDeeper: false,
+          message:
+              scannerError ?? 'Gallery scanning is available on Android/iOS.',
+        );
+        return;
+      }
+      final attempted = <String>{};
+      const maxAutoIncrements = 3;
+      final lastBatch = manual ? 0 : maxAutoIncrements;
+      for (var batch = 0; batch <= lastBatch; batch++) {
+        if (!mounted || ticket != request) return;
+        setState(() {
+          scanning = true;
+          scannedCount = 0;
+          targetCount = additionalCount ?? 300;
+          status = batch == 0
+              ? 'Scanning on this device...'
+              : 'Searching deeper...';
+        });
+        GalleryScanProgress? last;
+        await for (final progress in scanner.scanUpTo(
+          additionalCount: additionalCount ?? 300,
+          dateFilter: dateHint,
+          attemptedAssetIds: attempted,
+        )) {
+          if (!mounted || ticket != request) {
+            scanner.cancelScan();
+            break;
+          }
+          last = progress;
+          setState(() {
+            scannedCount = progress.processed;
+            targetCount = progress.total;
+            if (batch == 0 || !progress.isScanning) status = progress.message;
+          });
+        }
+        if (!mounted || ticket != request) return;
+        setState(() => scanning = false);
+        outcome = await _searchWith(parsed, dateHint);
+        if (!mounted || ticket != request) return;
+        final ready = last?.status == 'ready';
+        final hasMore = ready && last!.hasMore;
+        if (outcome.galleryMatches.isNotEmpty ||
+            !hasMore ||
+            batch == lastBatch) {
+          final message = !ready
+              ? last?.message ?? 'Scan stopped.'
+              : outcome.galleryMatches.isNotEmpty
+              ? 'Ready'
+              : hasMore
+              ? 'No matching gallery photos yet. You can search deeper.'
+              : 'No matches found in accessible indexed photos. Failed photos may need retry.';
+          _showResults(outcome, parsed, allowDeeper: hasMore, message: message);
+          return;
+        }
+      }
+    } catch (error) {
+      if (!mounted || ticket != request) return;
+      setState(() {
+        scanning = false;
+        phase = SearchPhase.uncertain;
+        status = 'Could not complete search: $error';
+      });
     }
+  }
+
+  Future<_SearchOutcome> _searchWith(
+    HelpdeskQuery parsed,
+    DateTimeRange? dateHint,
+  ) async {
     final evidenceById = <String, Evidence>{};
-    final indexedSamples = <AnalyzedScreenshot>[];
-    final corpus = _availableEvidence;
-    for (final entry in corpus.asMap().entries) {
+    final gallery = <AnalyzedScreenshot>[];
+    final dates = {
+      for (final record in scanner.records)
+        record.assetId: record.assetCreatedAt,
+    };
+    for (final entry in galleryEvidence.entries) {
+      final evidence = entry.value;
+      final created = dates[entry.key];
+      if (dateHint != null &&
+          (created == null ||
+              created.isBefore(dateHint.start) ||
+              created.isAfter(dateHint.end))) {
+        continue;
+      }
+      final id = evidence.sourceScreenshotId!;
+      evidenceById[id] = evidence;
+      final analyzed = _analyzedGallery[id];
+      if (analyzed != null) gallery.add(analyzed);
+    }
+    final demo = <AnalyzedScreenshot>[];
+    for (final entry in samples.asMap().entries) {
       final evidence = entry.value;
       final screenshotId = evidence.sourceScreenshotId ?? 'sample-${entry.key}';
       evidenceById[screenshotId] = evidence;
-      indexedSamples.add(
+      demo.add(
         ai.analyze(
           OcrScreenshot(
             screenshotId: screenshotId,
@@ -302,25 +429,44 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       );
     }
-    final answer = await ai.answer(input, indexedSamples);
-    if (!mounted || ticket != request) return;
-    final candidates = <Evidence>[];
-    for (final source in answer.sources) {
-      final evidence = evidenceById[source.screenshot.screenshotId];
-      if (evidence != null) {
-        candidates.add(
-          evidence.withSourceMatches(
-            screenshotId: source.screenshot.screenshotId,
-            blockIds: source.matchingBlockIds,
-          ),
-        );
+    final galleryAnswer = await ai.answer(parsed.originalText, gallery);
+    final demoAnswer = await ai.answer(parsed.originalText, demo);
+    List<Evidence> evidenceFor(GroundedAnswer answer) {
+      final candidates = <Evidence>[];
+      for (final source in answer.sources) {
+        final evidence = evidenceById[source.screenshot.screenshotId];
+        if (evidence != null) {
+          candidates.add(
+            evidence.withSourceMatches(
+              screenshotId: source.screenshot.screenshotId,
+              blockIds: source.matchingBlockIds,
+            ),
+          );
+        }
       }
+      return candidates;
     }
-    final parsedQuery = ai.parseQuery(input);
+
+    return _SearchOutcome(
+      evidenceFor(galleryAnswer),
+      evidenceFor(demoAnswer),
+      '${galleryAnswer.text}${demoAnswer.sources.isEmpty ? '' : '\n\nDemo content (fictional):\n${demoAnswer.text}'}',
+    );
+  }
+
+  void _showResults(
+    _SearchOutcome outcome,
+    HelpdeskQuery parsedQuery, {
+    required bool allowDeeper,
+    required String message,
+  }) {
     setState(() {
-      matches = candidates;
-      answerText = answer.text;
-      phase = candidates.isNotEmpty ? SearchPhase.found : SearchPhase.uncertain;
+      scanning = false;
+      matches = [...outcome.galleryMatches, ...outcome.sampleMatches];
+      answerText = outcome.text;
+      _allowDeeper = allowDeeper;
+      status = message;
+      phase = matches.isNotEmpty ? SearchPhase.found : SearchPhase.uncertain;
       if (phase == SearchPhase.uncertain) {
         category = switch (parsedQuery.category) {
           HelpdeskCategory.gcashReceipt => 'Receipts',
@@ -335,12 +481,16 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void reset() {
     request++;
+    scanner.cancelScan();
     query.clear();
     setState(() {
       phase = SearchPhase.idle;
       category = 'All';
       matches = [];
       answerText = null;
+      scanning = false;
+      _allowDeeper = false;
+      status = 'Search cancelled. Indexed photos are saved.';
     });
     if (page.hasClients) {
       page.jumpTo(0);
@@ -370,6 +520,27 @@ class _HomeScreenState extends State<HomeScreen> {
       SearchPhase.uncertain => 'I couldn’t find an exact match. Browse these samples or try a different detail.',
     };
     return Scaffold(
+      bottomNavigationBar: scanning
+          ? SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      'Scanning on this device. Nothing leaves your phone.',
+                    ),
+                    Text('$scannedCount / $targetCount'),
+                    LinearProgressIndicator(
+                      value: targetCount == 0
+                          ? null
+                          : (scannedCount / targetCount).clamp(0.0, 1.0),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          : null,
       appBar: AppBar(
         toolbarHeight: 70,
         title: const Row(
@@ -409,7 +580,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                       SizedBox(height: 12),
                       Text(
-                        'Search uses the offline Dart helpdesk core with fictional examples and any photos you choose to scan. Gallery images are copied to private app storage for OCR and source viewing; nothing is uploaded. First-use airplane-mode behavior still needs testing on the target tablet. ObjectBox, language-model inference, and notifications are not connected.',
+                        'Search uses the offline Dart helpdesk core with fictional examples and any photos you choose to scan. Gallery images are copied to private app storage for OCR and source viewing; nothing is uploaded. Local storage: ObjectBox, on-device only. First-use airplane-mode behavior still needs testing on the target tablet. Language-model inference and notifications are not connected.',
                       ),
                       SizedBox(height: 12),
                       Text(
@@ -444,7 +615,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ],
               ),
-              if (isGalleryScanningSupported) ...[
+              if (scanner.isSupported) ...[
                 const SizedBox(height: 12),
                 _galleryScanPanel(),
               ],
@@ -627,7 +798,29 @@ class _HomeScreenState extends State<HomeScreen> {
                       textAlign: TextAlign.center,
                     ),
                   ),
-                ...visible.map((e) => EvidenceCard(evidence: e)),
+                ...visible
+                    .where((e) => e.isGallerySource)
+                    .map((e) => EvidenceCard(evidence: e)),
+                if (visible.any((e) => !e.isGallerySource)) ...[
+                  const Divider(),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 8),
+                    child: Text(
+                      'Demo content',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                  ...visible
+                      .where((e) => !e.isGallerySource)
+                      .map((e) => EvidenceCard(evidence: e)),
+                ],
+                if (_allowDeeper)
+                  TextButton(
+                    onPressed: scanner.isRunning
+                        ? null
+                        : () => handleSearch(_lastQuery, additionalCount: 300),
+                    child: const Text('Search deeper (add 300 more)'),
+                  ),
               ],
               const SizedBox(height: 20),
               const Text(
@@ -643,7 +836,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _galleryScanPanel() {
-    final running = scanProgress.isScanning;
+    final running =
+        scanning || scanner.isRunning || phase == SearchPhase.searching;
     final indexedCount = scanner.records
         .where((record) => !record.isFailed)
         .length;
@@ -658,7 +852,7 @@ class _HomeScreenState extends State<HomeScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Scan photos on this device',
+            'Search photos on this device',
             style: TextStyle(fontWeight: FontWeight.w700, color: ink),
           ),
           const SizedBox(height: 4),
@@ -671,13 +865,25 @@ class _HomeScreenState extends State<HomeScreen> {
             'Scans stay on this device. Clear scan removes the app’s copies and OCR data.',
             style: TextStyle(fontSize: 11, color: Colors.black54),
           ),
-          if (running || scanProgress.total > 0) ...[
+          if (scanning) ...[
+            const SizedBox(height: 8),
+            const Text('Scanning on this device. Nothing leaves your phone.'),
+            Text('$scannedCount / $targetCount'),
+            LinearProgressIndicator(
+              value: targetCount == 0
+                  ? null
+                  : (scannedCount / targetCount).clamp(0.0, 1.0),
+            ),
+          ] else if (scanProgress.isScanning) ...[
             const SizedBox(height: 10),
             LinearProgressIndicator(value: running ? scanProgress.fraction : 1),
           ],
           const SizedBox(height: 6),
           Text(
-            scannerError ?? scanProgress.message,
+            scannerError ??
+                (scanProgress.isScanning && !scanning
+                    ? scanProgress.message
+                    : status),
             style: TextStyle(
               fontSize: 12,
               color: scannerError == null
@@ -690,23 +896,13 @@ class _HomeScreenState extends State<HomeScreen> {
             spacing: 8,
             runSpacing: 6,
             children: [
-              OutlinedButton.icon(
-                onPressed: scannerReady && !running
-                    ? scanProgress.status == 'interrupted'
-                        ? _resumeInterruptedScan
-                        : _scanGallery
-                    : null,
-                icon: const Icon(Icons.photo_library_outlined, size: 18),
-                label: Text(
-                  switch (scanProgress.status) {
-                    'interrupted'
-                        when scanProgress.pendingPickedPhotos.isNotEmpty =>
-                      'Resume selected photos',
-                    'interrupted' => 'Resume gallery scan',
-                    _ => 'Scan permitted gallery',
-                  },
+              if (scanProgress.pendingPickedPhotos.isNotEmpty)
+                TextButton(
+                  onPressed: scannerReady && !running
+                      ? _resumeInterruptedScan
+                      : null,
+                  child: const Text('Resume selected photos'),
                 ),
-              ),
               FilledButton.tonalIcon(
                 onPressed: scannerReady && !running ? _choosePhotos : null,
                 icon: const Icon(Icons.add_photo_alternate_outlined, size: 18),
@@ -734,6 +930,13 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
+}
+
+class _SearchOutcome {
+  const _SearchOutcome(this.galleryMatches, this.sampleMatches, this.text);
+  final List<Evidence> galleryMatches;
+  final List<Evidence> sampleMatches;
+  final String text;
 }
 
 class EvidenceCard extends StatelessWidget {
@@ -787,7 +990,9 @@ class EvidenceCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      evidence.category,
+                      evidence.isGallerySource
+                          ? evidence.category
+                          : '${evidence.category} · Demo content',
                       style: const TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w600,

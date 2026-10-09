@@ -1,0 +1,201 @@
+{
+  "_note1": "KEEP THIS FILE! Check it into a version control system (VCS) like git.",
+  "_note2": "ObjectBox manages crucial IDs for your object model. See docs for details.",
+  "_note3": "If you have VCS merge conflicts, you must resolve them according to ObjectBox docs.",
+  "entities": [
+    {
+      "id": "1:5368148190212914637",
+      "lastPropertyId": "17:4850887395683498211",
+      "name": "IndexedScreenshot",
+      "properties": [
+        {
+          "id": "1:6290670535281339152",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:8809161676452691746",
+          "name": "galleryAssetId",
+          "indexId": "1:176070205834887753",
+          "type": 9,
+          "flags": 2080
+        },
+        {
+          "id": "3:8435606926028193862",
+          "name": "originalName",
+          "type": 9
+        },
+        {
+          "id": "4:5863480924955045325",
+          "name": "localPath",
+          "type": 9
+        },
+        {
+          "id": "5:3182856356435387460",
+          "name": "status",
+          "type": 9
+        },
+        {
+          "id": "6:867172718750025493",
+          "name": "error",
+          "type": 9
+        },
+        {
+          "id": "7:6142162767704953346",
+          "name": "importedAt",
+          "type": 10
+        },
+        {
+          "id": "8:9043717042568809834",
+          "name": "assetModifiedAt",
+          "type": 10
+        },
+        {
+          "id": "9:1219112507240059533",
+          "name": "contentHash",
+          "type": 9
+        },
+        {
+          "id": "10:8290406877632722878",
+          "name": "category",
+          "type": 9
+        },
+        {
+          "id": "11:1081897924738649672",
+          "name": "imageWidth",
+          "type": 6
+        },
+        {
+          "id": "12:4995831309486065272",
+          "name": "imageHeight",
+          "type": 6
+        },
+        {
+          "id": "13:4721760938475847866",
+          "name": "scannedAt",
+          "indexId": "2:7670898345681144790",
+          "type": 10,
+          "flags": 8
+        },
+        {
+          "id": "14:3546147339136563922",
+          "name": "scannedAtIso",
+          "type": 9
+        },
+        {
+          "id": "15:7802673678355565636",
+          "name": "blocksJson",
+          "type": 9
+        },
+        {
+          "id": "16:6950764016599235108",
+          "name": "embedding",
+          "indexId": "3:6553712912507568877",
+          "type": 28,
+          "flags": 8
+        },
+        {
+          "id": "17:4850887395683498211",
+          "name": "assetCreatedAt",
+          "type": 10
+        }
+      ],
+      "relations": []
+    },
+    {
+      "id": "2:1574887382723890021",
+      "lastPropertyId": "8:8386894270067297913",
+      "name": "ScanProgressRow",
+      "properties": [
+        {
+          "id": "1:4027415203154758741",
+          "name": "id",
+          "type": 6,
+          "flags": 129
+        },
+        {
+          "id": "2:6516129944208628180",
+          "name": "progressJson",
+          "type": 9
+        },
+        {
+          "id": "3:73911600395300457",
+          "name": "updatedAt",
+          "type": 10
+        },
+        {
+          "id": "4:4671909091324697636",
+          "name": "scanStartedAt",
+          "type": 10
+        },
+        {
+          "id": "5:3628364939784900445",
+          "name": "currentCursor",
+          "type": 9
+        },
+        {
+          "id": "6:2280414253616927018",
+          "name": "processedCount",
+          "type": 6
+        },
+        {
+          "id": "7:381762649950005696",
+          "name": "failedCount",
+          "type": 6
+        },
+        {
+          "id": "8:8386894270067297913",
+          "name": "status",
+          "type": 9
+        }
+      ],
+      "relations": []
+    },
+    {
+      "id": "3:6352156171564327643",
+      "lastPropertyId": "5:521609937337066451",
+      "name": "ScanCoverage",
+      "properties": [
+        {
+          "id": "1:3932315692579998761",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:3318834440184377645",
+          "name": "rangeStart",
+          "type": 10
+        },
+        {
+          "id": "3:5357010124880752322",
+          "name": "rangeEnd",
+          "type": 10
+        },
+        {
+          "id": "4:1466957272109929768",
+          "name": "updatedAt",
+          "type": 10
+        },
+        {
+          "id": "5:521609937337066451",
+          "name": "scannedCount",
+          "type": 6
+        }
+      ],
+      "relations": []
+    }
+  ],
+  "lastEntityId": "3:6352156171564327643",
+  "lastIndexId": "3:6553712912507568877",
+  "lastRelationId": "0:0",
+  "lastSequenceId": "0:0",
+  "modelVersion": 5,
+  "modelVersionParserMinimum": 5,
+  "retiredEntityUids": [],
+  "retiredIndexUids": [],
+  "retiredPropertyUids": [],
+  "retiredRelationUids": [],
+  "version": 1
+}

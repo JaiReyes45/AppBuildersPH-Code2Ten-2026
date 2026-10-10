@@ -8,6 +8,7 @@ import 'package:gallery_helpdesk_ai/gallery_helpdesk_ai.dart';
 import 'dart:math' as math;
 
 import 'evidence_image.dart';
+import 'candidate_modal.dart';
 import 'gallery_scanner.dart';
 import 'gallery_storage_api.dart' show SearchHistoryStorage;
 import 'search_counts.dart';

@@ -152,6 +152,7 @@ class FakeOcrScanner extends GalleryScanner {
   Future<void> scanSingleAsset(
     AssetEntity asset, {
     HelpdeskQuery? currentQuery,
+    CandidateDecision? onCandidate,
   }) async {
     await beforeOcr?.call();
     processedIds.add(asset.id);
@@ -171,6 +172,7 @@ class FakeOcrScanner extends GalleryScanner {
     DateTimeRange? dateFilter,
     Set<String>? attemptedAssetIds,
     HelpdeskQuery? currentQuery,
+    CandidateDecision? onCandidate,
   }) {
     batchSizes.add(additionalCount);
     return super.scanUpTo(
@@ -178,6 +180,7 @@ class FakeOcrScanner extends GalleryScanner {
       dateFilter: dateFilter,
       attemptedAssetIds: attemptedAssetIds,
       currentQuery: currentQuery,
+      onCandidate: onCandidate,
     );
   }
 }

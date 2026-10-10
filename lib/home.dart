@@ -507,6 +507,8 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       scanner.refreshCatalog();
       final attempted = <String>{};
+      final rejectedIds = <String>{};
+      var stopAsking = false;
       var scanExtensions = 0;
       const maxScanExtensions = 3;
       for (var batch = 0; ; batch++) {
@@ -525,6 +527,41 @@ class _HomeScreenState extends State<HomeScreen> {
           dateFilter: dateHint,
           attemptedAssetIds: attempted,
           currentQuery: parsed,
+          onCandidate: (candidate) async {
+            if (stopAsking) return CandidateAction.stopAsking;
+            if (rejectedIds.contains(candidate.assetId)) {
+              return CandidateAction.reject;
+            }
+            if (!mounted || ticket != request) {
+              scanner.cancelScan();
+              return CandidateAction.reject;
+            }
+
+            final decision = await showDialog<CandidateAction>(
+              context: context,
+              barrierDismissible: false,
+              animationStyle: MediaQuery.disableAnimationsOf(context)
+                  ? AnimationStyle.noAnimation
+                  : null,
+              builder: (dialogContext) => CandidateModal(
+                candidate: candidate,
+                onStopAsking: () {
+                  stopAsking = true;
+                  Navigator.of(dialogContext).pop(CandidateAction.stopAsking);
+                },
+              ),
+            );
+            if (!mounted || ticket != request) {
+              scanner.cancelScan();
+              return CandidateAction.reject;
+            }
+            if (decision == null || decision == CandidateAction.reject) {
+              rejectedIds.add(candidate.assetId);
+              return CandidateAction.reject;
+            }
+            if (decision == CandidateAction.stopAsking) stopAsking = true;
+            return decision;
+          },
         )) {
           if (!mounted || ticket != request) {
             scanner.cancelScan();

@@ -1,8 +1,49 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gallery_helpdesk/main.dart';
+import 'package:gallery_helpdesk/gallery_scanner.dart';
+import 'package:photo_manager/photo_manager.dart';
 
 import 'search_test_fakes.dart';
+
+class _CandidateScanner extends GalleryScanner {
+  _CandidateScanner(this.texts, this.storage, FakeAssetSource source)
+    : super(initialStorage: storage, assetSource: source);
+
+  final Map<String, String> texts;
+  final SearchMemoryStorage storage;
+  final List<String> thumbnailIds = [];
+  final List<String> fullResolutionIds = [];
+
+  @override
+  bool get isSupported => true;
+
+  @override
+  Future<String?> imagePathForAsset(AssetEntity asset) async => asset.id;
+
+  @override
+  Future<GalleryOcrResult> ocrThumbnail(String imagePath) async {
+    thumbnailIds.add(imagePath);
+    return GalleryOcrResult([
+      GalleryScanBlock(id: 'thumbnail-$imagePath', text: texts[imagePath]!),
+    ]);
+  }
+
+  @override
+  Future<GalleryOcrResult> ocrFull(String imagePath) async {
+    fullResolutionIds.add(imagePath);
+    return GalleryOcrResult([
+      GalleryScanBlock(
+        id: 'full-$imagePath',
+        text: texts[imagePath]!,
+        left: 0,
+        top: 0,
+        width: 100,
+        height: 100,
+      ),
+    ]);
+  }
+}
 
 Widget testApp() => GalleryHelpdeskApp(
   showDemoContent: true,
@@ -244,6 +285,129 @@ void main() {
     expect(scanner.batchSizes, [40, 40, 40, 40]);
     expect(scanner.processedIds, hasLength(160));
     expect(scanner.batchSizes, isNot(contains(80)));
+  });
+
+  testWidgets('accepting a candidate persists it and stops before next image', (
+    tester,
+  ) async {
+    final storage = SearchMemoryStorage();
+    final scanner = _CandidateScanner(
+      const {'first': 'Diancie card', 'second': 'Diancie card'},
+      storage,
+      FakeAssetSource([
+        fakeAsset('first', DateTime(2026, 10, 10, 0, 0, 2)),
+        fakeAsset('second', DateTime(2026, 10, 10, 0, 0, 1)),
+      ]),
+    );
+    await tester.pumpWidget(
+      GalleryHelpdeskApp(
+        scanner: scanner,
+        autoScanGallery: false,
+        showDemoContent: false,
+      ),
+    );
+
+    await submit(tester, 'Diancie');
+    expect(find.text("Is this what you're looking for?"), findsOneWidget);
+    await tester.tap(find.text("Yes, that's it"));
+    await tester.pumpAndSettle();
+
+    expect(scanner.fullResolutionIds, ['first']);
+    expect(storage.data.keys, ['first']);
+    expect(storage.data['first']?['status'], 'complete');
+    expect(find.textContaining('Ta-da!'), findsOneWidget);
+  });
+
+  testWidgets('rejecting a candidate skips persistence and continues scan', (
+    tester,
+  ) async {
+    final storage = SearchMemoryStorage();
+    final scanner = _CandidateScanner(
+      const {'candidate': 'Diancie card', 'next': 'unrelated screenshot'},
+      storage,
+      FakeAssetSource([
+        fakeAsset('candidate', DateTime(2026, 10, 10, 0, 0, 2)),
+        fakeAsset('next', DateTime(2026, 10, 10, 0, 0, 1)),
+      ]),
+    );
+    await tester.pumpWidget(
+      GalleryHelpdeskApp(
+        scanner: scanner,
+        autoScanGallery: false,
+        showDemoContent: false,
+      ),
+    );
+
+    await submit(tester, 'Diancie');
+    await tester.tap(find.text('No, keep looking'));
+    await tester.pumpAndSettle();
+
+    expect(scanner.thumbnailIds, ['candidate', 'next']);
+    expect(storage.data.containsKey('candidate'), isFalse);
+    expect(
+      storage.data.values.where((record) => record['status'] == 'complete'),
+      isEmpty,
+    );
+  });
+
+  testWidgets('stop asking persists the rest without another prompt', (
+    tester,
+  ) async {
+    final storage = SearchMemoryStorage();
+    final scanner = _CandidateScanner(
+      const {'first': 'Diancie card', 'second': 'Diancie card'},
+      storage,
+      FakeAssetSource([
+        fakeAsset('first', DateTime(2026, 10, 10, 0, 0, 2)),
+        fakeAsset('second', DateTime(2026, 10, 10, 0, 0, 1)),
+      ]),
+    );
+    await tester.pumpWidget(
+      GalleryHelpdeskApp(
+        scanner: scanner,
+        autoScanGallery: false,
+        showDemoContent: false,
+      ),
+    );
+
+    await submit(tester, 'Diancie');
+    await tester.tap(find.text('Stop asking for this query'));
+    await tester.pumpAndSettle();
+
+    expect(scanner.fullResolutionIds, ['first', 'second']);
+    expect(
+      storage.data.values.where((record) => record['status'] == 'complete'),
+      hasLength(2),
+    );
+    expect(find.text("Is this what you're looking for?"), findsNothing);
+  });
+
+  testWidgets('Android back rejects without persisting and continues scan', (
+    tester,
+  ) async {
+    final storage = SearchMemoryStorage();
+    final scanner = _CandidateScanner(
+      const {'candidate': 'Diancie card', 'next': 'unrelated screenshot'},
+      storage,
+      FakeAssetSource([
+        fakeAsset('candidate', DateTime(2026, 10, 10, 0, 0, 2)),
+        fakeAsset('next', DateTime(2026, 10, 10, 0, 0, 1)),
+      ]),
+    );
+    await tester.pumpWidget(
+      GalleryHelpdeskApp(
+        scanner: scanner,
+        autoScanGallery: false,
+        showDemoContent: false,
+      ),
+    );
+
+    await submit(tester, 'Diancie');
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+
+    expect(scanner.thumbnailIds, ['candidate', 'next']);
+    expect(storage.data.containsKey('candidate'), isFalse);
   });
 
   testWidgets('GCash 500 returns only the matching amount', (tester) async {

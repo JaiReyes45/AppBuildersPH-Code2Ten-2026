@@ -158,6 +158,32 @@ void main() {
     },
   );
 
+  test('candidate callback runs only after the full-resolution gate', () async {
+    final storage = _CountingStorage();
+    final scanner = _StagedScanner(
+      storage,
+      FakeAssetSource([fakeAsset('candidate', DateTime(2026, 10, 10))]),
+      thumbnailTexts: const {'candidate': 'Diancie card'},
+      fullTexts: const {'candidate': 'unrelated full-resolution text'},
+    );
+    var candidateCalls = 0;
+
+    await scanner
+        .scanUpTo(
+          additionalCount: 1,
+          currentQuery: GalleryHelpdeskAi().parseQuery('Diancie'),
+          onCandidate: (_) async {
+            candidateCalls++;
+            return CandidateAction.accept;
+          },
+        )
+        .toList();
+
+    expect(candidateCalls, 0);
+    expect(storage.copies, 0);
+    expect(storage.data['candidate']?['status'], 'thumbnail');
+  });
+
   test(
     'query scan promotes only matching thumbnail and halves measured work',
     () async {

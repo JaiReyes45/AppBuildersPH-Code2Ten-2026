@@ -17,6 +17,28 @@ final RegExp _thumbnailAmountPattern = RegExp(
   caseSensitive: false,
 );
 
+typedef CandidateDecision = Future<CandidateAction> Function(
+  GalleryCandidate candidate,
+);
+
+enum CandidateAction { accept, reject, stopAsking }
+
+class GalleryCandidate {
+  const GalleryCandidate({
+    required this.assetId,
+    required this.displayName,
+    required this.imagePath,
+    required this.blocks,
+    required this.assetCreatedAt,
+  });
+
+  final String assetId;
+  final String displayName;
+  final String? imagePath;
+  final List<GalleryScanBlock> blocks;
+  final DateTime? assetCreatedAt;
+}
+
 class GalleryOcrResult {
   const GalleryOcrResult(this.blocks);
 
@@ -407,6 +429,7 @@ class GalleryScanner {
   Future<void> scanSingleAsset(
     AssetEntity asset, {
     HelpdeskQuery? currentQuery,
+    CandidateDecision? onCandidate,
   }) async {
     try {
       final loading = Stopwatch()..start();
@@ -426,6 +449,7 @@ class GalleryScanner {
           asset.title ?? 'Gallery image',
           imagePath,
           currentQuery: currentQuery,
+          onCandidate: onCandidate,
           assetCreatedAt: asset.createDateTime,
         );
       }
@@ -445,6 +469,7 @@ class GalleryScanner {
     DateTimeRange? dateFilter,
     Set<String>? attemptedAssetIds,
     HelpdeskQuery? currentQuery,
+    CandidateDecision? onCandidate,
   }) async* {
     if (additionalCount <= 0) throw ArgumentError.value(additionalCount);
     await initialize();
@@ -469,6 +494,7 @@ class GalleryScanner {
     var added = 0;
     var hasMore = false;
     final attempted = attemptedAssetIds ?? <String>{};
+    var activeCandidateDecision = onCandidate;
     final pipelineStats = currentQuery == null ? null : _PipelineStats();
     _pipelineStats = pipelineStats;
     try {
@@ -507,7 +533,19 @@ class GalleryScanner {
       for (final asset in assets) {
         if (_cancelRequested) break;
         attempted.add(asset.id);
-        await scanSingleAsset(asset, currentQuery: currentQuery);
+        CandidateAction? candidateAction;
+        final decision = activeCandidateDecision == null
+            ? null
+            : (GalleryCandidate candidate) async {
+                final action = await activeCandidateDecision!(candidate);
+                candidateAction = action;
+                return action;
+              };
+        await scanSingleAsset(
+          asset,
+          currentQuery: currentQuery,
+          onCandidate: decision,
+        );
         processed++;
         final succeeded = _records.containsKey(asset.id)
             ? !_records[asset.id]!.isFailed
@@ -527,6 +565,10 @@ class GalleryScanner {
           ),
         );
         yield _progress;
+        if (candidateAction == CandidateAction.stopAsking) {
+          activeCandidateDecision = null;
+        }
+        if (candidateAction == CandidateAction.accept) break;
       }
       await _publish(
         GalleryScanProgress(
@@ -1146,6 +1188,7 @@ class GalleryScanner {
     String displayName,
     String sourcePath, {
     HelpdeskQuery? currentQuery,
+    CandidateDecision? onCandidate,
     DateTime? assetCreatedAt,
   }) async {
     String? imagePath;
@@ -1179,6 +1222,39 @@ class GalleryScanner {
       final fullResOcr = Stopwatch()..start();
       result = await ocrFull(sourcePath);
       ScanTimings.add('fullResOcr', fullResOcr.elapsedMicroseconds);
+      if (currentQuery != null &&
+          !matchesQuery(result.recognizedText, currentQuery)) {
+        final record = GalleryScanRecord(
+          assetId: assetId,
+          displayName: displayName,
+          status: 'thumbnail',
+          scannedAt: DateTime.now(),
+          blocks: List.unmodifiable(
+            _recordBlocks(assetId, result, includeCoordinates: false),
+          ),
+          assetCreatedAt: assetCreatedAt,
+        );
+        _records[assetId] = record;
+        await _storage!.saveRecord(record.toJson());
+        onRecord?.call(record);
+        return;
+      }
+
+      final blocks = List<GalleryScanBlock>.unmodifiable(
+        _recordBlocks(assetId, result, includeCoordinates: true),
+      );
+      if (currentQuery != null && onCandidate != null) {
+        final action = await onCandidate(
+          GalleryCandidate(
+            assetId: assetId,
+            displayName: displayName,
+            imagePath: sourcePath,
+            blocks: blocks,
+            assetCreatedAt: assetCreatedAt,
+          ),
+        );
+        if (_cancelRequested || action == CandidateAction.reject) return;
+      }
       final copying = Stopwatch()..start();
       imagePath = await _storage!.saveImage(assetId, sourcePath);
       ScanTimings.add('copy', copying.elapsedMicroseconds);
@@ -1189,9 +1265,7 @@ class GalleryScanner {
         status: 'complete',
         scannedAt: DateTime.now(),
         imagePath: imagePath,
-        blocks: List.unmodifiable(
-          _recordBlocks(assetId, result, includeCoordinates: true),
-        ),
+        blocks: blocks,
         assetCreatedAt: assetCreatedAt,
       );
       _records[assetId] = record;

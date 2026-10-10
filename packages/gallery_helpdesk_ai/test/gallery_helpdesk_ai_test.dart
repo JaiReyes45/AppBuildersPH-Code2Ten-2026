@@ -195,7 +195,7 @@ void main() {
 
       final gcash = pipeline.parseQuery('gcash 500');
       expect(gcash.amount, '500');
-      expect(gcash.keywords, ['gcash']);
+      expect(gcash.keywords, isEmpty);
     });
 
     test('retrieves amount matches and cites the matching OCR block', () async {

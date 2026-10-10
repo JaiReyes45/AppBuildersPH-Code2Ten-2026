@@ -1,10 +1,7 @@
 import 'models.dart';
+import 'normalization.dart';
 
 class FieldExtractor {
-  static final RegExp _amountPattern = RegExp(
-    r'(?:\bPHP\b|\bP\b|₱)\s*([\d,]+(?:\.\d{1,2})?)|\b([\d,]+(?:\.\d{1,2})?)\s*(?:PHP\b|₱)',
-    caseSensitive: false,
-  );
   static final RegExp _referencePattern = RegExp(
     r'\b(?:reference|ref)(?:\s*(?:no\.?|number|#)\s*[:#-]?\s*|[:#-]\s*)([A-Z0-9][A-Z0-9-]{3,})\b',
     caseSensitive: false,
@@ -65,9 +62,9 @@ class FieldExtractor {
       _addMatches(
         fields,
         block,
-        _amountPattern,
+        amountWithCurrencyPattern,
         ExtractedFieldType.amount,
-        normalize: _normalizeAmount,
+        normalize: normalizeAmount,
       );
       _addMatches(
         fields,
@@ -215,12 +212,5 @@ class FieldExtractor {
       final key = '${field.type.name}:${field.rawValue.toLowerCase()}';
       return seen.add(key);
     }).toList();
-  }
-
-  static String _normalizeAmount(String value) {
-    final amount = value.replaceAll(',', '');
-    if (!amount.contains('.')) return '$amount.00';
-    final decimalDigits = amount.length - amount.lastIndexOf('.') - 1;
-    return decimalDigits == 1 ? '${amount}0' : amount;
   }
 }

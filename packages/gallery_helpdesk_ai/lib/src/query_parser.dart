@@ -1,10 +1,10 @@
 import 'models.dart';
+import 'normalization.dart';
 import 'typo_matching.dart';
 
 class HelpdeskQueryParser {
-  static final RegExp _amountPattern = RegExp(
-    r'(?:\bPHP\b|\bP\b|₱)\s*([\d,]+(?:\.\d{1,2})?)|\b([\d,]+(?:\.\d{1,2})?)\s*(?:PHP\b|₱)',
-    caseSensitive: false,
+  static final RegExp _bareAmountPattern = RegExp(
+    r'(?<![A-Za-z0-9-])([\d,]+(?:\.\d{1,2})?)(?![A-Za-z0-9-])',
   );
   static final RegExp _referencePattern = RegExp(
     r'\b(?:reference|ref)(?:\s*(?:no\.?|number|#)\s*[:#-]?\s*|[:#-]\s*)([A-Z0-9][A-Z0-9-]{3,})\b',
@@ -130,10 +130,6 @@ class HelpdeskQueryParser {
         _referencePattern.firstMatch(text) ??
         _transactionIdPattern.firstMatch(text);
     final orderMatch = _orderPattern.firstMatch(text);
-    final amountMatch = _amountPattern.firstMatch(text);
-    final amountValue = amountMatch?.group(1) ?? amountMatch?.group(2);
-    final amount = amountValue == null ? null : _normalizeAmount(amountValue);
-
     final candidate = identifierMatch?.group(1) ?? orderMatch?.group(1);
     final exactIdentifier =
         candidate != null && !_ignoredWords.contains(candidate.toLowerCase())
@@ -144,6 +140,22 @@ class HelpdeskQueryParser {
         : orderMatch != null
         ? ExactIdentifierType.orderNumber
         : null;
+
+    final hasReceiptContext =
+        lower.contains('gcash') || lower.contains('receipt');
+    final amountMatch = amountWithCurrencyPattern.firstMatch(text);
+    final textWithoutIdentifiers = text
+        .replaceAll(_referencePattern, ' ')
+        .replaceAll(_transactionIdPattern, ' ')
+        .replaceAll(_orderPattern, ' ');
+    final bareAmountMatch = amountMatch == null && hasReceiptContext
+        ? _bareAmountPattern.firstMatch(textWithoutIdentifiers)
+        : null;
+    final amountValue =
+        amountMatch?.group(1) ??
+        amountMatch?.group(2) ??
+        bareAmountMatch?.group(1);
+    final amount = amountValue == null ? null : normalizeAmount(amountValue);
 
     final isReferenceLookup =
         lower.contains('reference') || RegExp(r'\bref\b').hasMatch(lower);
@@ -160,9 +172,7 @@ class HelpdeskQueryParser {
     final isAnnouncementSearch =
         lower.contains('announcement') || lower.contains('student notice');
     final isReceiptSearch =
-        lower.contains('gcash') ||
-        lower.contains('receipt') ||
-        amount != null && lower.contains('php');
+        hasReceiptContext || amount != null && lower.contains('php');
 
     final intent = isReferenceLookup
         ? HelpdeskIntent.referenceLookup
@@ -184,22 +194,26 @@ class HelpdeskQueryParser {
       HelpdeskIntent.generalSearch => null,
     };
 
+    var keywordText = text
+        .toLowerCase()
+        .replaceAll(amountWithCurrencyPattern, ' ')
+        .replaceAll(
+          exactIdentifier == null ? RegExp(r'(?!)') : _referencePattern,
+          ' ',
+        )
+        .replaceAll(
+          exactIdentifier == null ? RegExp(r'(?!)') : _transactionIdPattern,
+          ' ',
+        )
+        .replaceAll(
+          exactIdentifier == null ? RegExp(r'(?!)') : _orderPattern,
+          ' ',
+        );
+    if (bareAmountMatch != null) {
+      keywordText = keywordText.replaceAll(_bareAmountPattern, ' ');
+    }
     final keywords =
-        text
-            .toLowerCase()
-            .replaceAll(_amountPattern, ' ')
-            .replaceAll(
-              exactIdentifier == null ? RegExp(r'(?!)') : _referencePattern,
-              ' ',
-            )
-            .replaceAll(
-              exactIdentifier == null ? RegExp(r'(?!)') : _transactionIdPattern,
-              ' ',
-            )
-            .replaceAll(
-              exactIdentifier == null ? RegExp(r'(?!)') : _orderPattern,
-              ' ',
-            )
+        keywordText
             .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
             .split(RegExp(r'\s+'))
             .where((word) => word.length > 1 && !_ignoredWords.contains(word))
@@ -217,12 +231,5 @@ class HelpdeskQueryParser {
       exactIdentifierType: exactIdentifierType,
       requiredPhrases: List.unmodifiable(phrases),
     );
-  }
-
-  static String _normalizeAmount(String value) {
-    final amount = value.replaceAll(',', '');
-    if (!amount.contains('.')) return '$amount.00';
-    final decimalDigits = amount.length - amount.lastIndexOf('.') - 1;
-    return decimalDigits == 1 ? '${amount}0' : amount;
   }
 }

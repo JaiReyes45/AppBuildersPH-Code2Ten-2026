@@ -28,6 +28,13 @@ Future<void> submit(WidgetTester tester, String text) async {
 }
 
 void main() {
+  final binding = TestWidgetsFlutterBinding.ensureInitialized();
+  setUp(() {
+    binding.platformDispatcher.accessibilityFeaturesTestValue =
+        FakeAccessibilityFeatures.allOn;
+  });
+  tearDown(binding.platformDispatcher.clearAccessibilityFeaturesTestValue);
+
   testWidgets(
     'home folders open a compact gallery without expanding home cards',
     (tester) async {
@@ -237,6 +244,40 @@ void main() {
     expect(scanner.batchSizes, [40, 40, 40, 40]);
     expect(scanner.processedIds, hasLength(160));
     expect(scanner.batchSizes, isNot(contains(80)));
+  });
+
+  testWidgets('GCash 500 returns only the matching amount', (tester) async {
+    final storage = SearchMemoryStorage();
+    for (final entry in {
+      'receipt-500': 'GCash\nPayment successful\nP500',
+      'receipt-1500': 'GCash\nPayment successful\n₱1,500',
+      'receipt-2500': 'GCash\nPayment successful\nPHP 2,500.00',
+    }.entries) {
+      await storage.saveRecord(
+        fakeRecord(
+          entry.key,
+          DateTime(2026, 10, 10),
+          text: entry.value,
+        ).toJson(),
+      );
+    }
+    final scanner = FakeOcrScanner(storage, FakeAssetSource([]));
+    await tester.pumpWidget(
+      GalleryHelpdeskApp(
+        scanner: scanner,
+        autoScanGallery: false,
+        showDemoContent: false,
+      ),
+    );
+
+    await submit(tester, 'GCash 500');
+    await tester.fling(pageScroll, const Offset(0, -2000), 2000);
+    await tester.pumpAndSettle();
+
+    expect(find.byType(EvidenceCard), findsOneWidget);
+    expect(find.text('P500'), findsOneWidget);
+    expect(find.text('₱1,500'), findsNothing);
+    expect(find.text('PHP 2,500.00'), findsNothing);
   });
 
   testWidgets('welcome completes with reduced motion and enlarged text', (

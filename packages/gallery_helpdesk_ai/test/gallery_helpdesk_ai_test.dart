@@ -24,7 +24,7 @@ void main() {
         (field) => field.type == ExtractedFieldType.amount,
       );
       expect(amount.rawValue, 'PHP 500.00');
-      expect(amount.normalizedValue, '500.00');
+      expect(amount.normalizedValue, '500');
       expect(amount.sourceBlockIds, ['b2']);
 
       final reference = result.fields.singleWhere(
@@ -56,8 +56,8 @@ void main() {
           (field) => field.type == ExtractedFieldType.amount,
         );
         expect(amount.rawValue, '500 PHP');
-        expect(amount.normalizedValue, '500.00');
-        expect(pipeline.parseQuery('GCash receipt 500 PHP').amount, '500.00');
+        expect(amount.normalizedValue, '500');
+        expect(pipeline.parseQuery('GCash receipt 500 PHP').amount, '500');
       },
     );
 
@@ -78,32 +78,28 @@ void main() {
         );
         expect(reference.rawValue, 'R-123456');
         expect(reference.sourceBlockIds, ['label', 'value']);
-    });
-
-    test('searching a split identifier cites both OCR blocks', () async {
-        final receipt = pipeline.analyze(
-          const OcrScreenshot(
-            screenshotId: 'receipt-split',
-            blocks: [
-              OcrBlock(id: 'g1', text: 'GCash transaction successful'),
-              OcrBlock(id: 'g2', text: 'Reference No.'),
-              OcrBlock(id: 'g3', text: 'R-123456'),
-            ],
-          ),
-        );
-
-        final answer = await pipeline.answer(
-          'What is the reference number?',
-          [receipt],
-        );
-
-        expect(answer.sources, hasLength(1));
-        expect(
-          answer.sources.single.matchingBlockIds,
-          containsAll(['g2', 'g3']),
-        );
       },
     );
+
+    test('searching a split identifier cites both OCR blocks', () async {
+      final receipt = pipeline.analyze(
+        const OcrScreenshot(
+          screenshotId: 'receipt-split',
+          blocks: [
+            OcrBlock(id: 'g1', text: 'GCash transaction successful'),
+            OcrBlock(id: 'g2', text: 'Reference No.'),
+            OcrBlock(id: 'g3', text: 'R-123456'),
+          ],
+        ),
+      );
+
+      final answer = await pipeline.answer('What is the reference number?', [
+        receipt,
+      ]);
+
+      expect(answer.sources, hasLength(1));
+      expect(answer.sources.single.matchingBlockIds, containsAll(['g2', 'g3']));
+    });
 
     test(
       'classifies order and announcement candidates without inventing data',

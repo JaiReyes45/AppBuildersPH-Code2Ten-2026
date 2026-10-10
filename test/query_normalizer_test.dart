@@ -8,7 +8,7 @@ void main() {
       normalizeAmountWords('give me gcash receipt that sent 1000 pesos'),
     );
     expect(query.category, HelpdeskCategory.gcashReceipt);
-    expect(query.amount, '1000.00');
+    expect(query.amount, '1000');
   });
   test('currency words are case-insensitive and comma amounts survive', () {
     expect(

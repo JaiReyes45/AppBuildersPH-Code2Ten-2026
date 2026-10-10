@@ -19,7 +19,7 @@ void main() {
     final query =
         'Could you show me the screenshot where I sent 300 pesos to Maria?';
     final parsed = ai.parseQuery(query);
-    expect(parsed.amount, '300.00');
+    expect(parsed.amount, '300');
     expect(parsed.requiredPhrases, ['maria']);
     final answer = await ai.answer(query, [
       receipt('right', 'Maria'),

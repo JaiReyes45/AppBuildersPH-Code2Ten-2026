@@ -33,6 +33,27 @@ AnalyzedScreenshot doc(String id, String text) => GalleryHelpdeskAi().analyze(
   ),
 );
 void main() {
+  test('semantic fallback requires a structured or literal OCR anchor', () {
+    final ai = GalleryHelpdeskAi();
+    final whitecloak = doc('whitecloak', 'WHITECLOAK WHITECLOA charizard');
+    final diancie = doc('diancie', 'Diancie EX trading card');
+
+    expect(
+      hasSemanticSearchAnchor(ai.parseQuery('unicorn dragon'), [whitecloak]),
+      isFalse,
+    );
+    expect(
+      hasSemanticSearchAnchor(ai.parseQuery('pokemon card called Diancie'), [
+        diancie,
+      ]),
+      isTrue,
+    );
+    expect(
+      hasSemanticSearchAnchor(ai.parseQuery('GCash 500 PHP'), [whitecloak]),
+      isTrue,
+    );
+  });
+
   test('scan-time retrieval does not backfill document embeddings', () async {
     final model = FakeEmbedder();
     final engine = SemanticSearch(model, MemorySemanticStore());

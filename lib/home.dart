@@ -1526,7 +1526,7 @@ class BotBox extends StatefulWidget {
 class _BotBoxState extends State<BotBox> with SingleTickerProviderStateMixin {
   late final AnimationController motion = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 850),
+    duration: const Duration(milliseconds: 3200),
   );
   @override
   void didChangeDependencies() {
@@ -1541,11 +1541,17 @@ class _BotBoxState extends State<BotBox> with SingleTickerProviderStateMixin {
   }
 
   void updateMotion() {
-    if (widget.phase == SearchPhase.searching &&
-        !MediaQuery.disableAnimationsOf(context)) {
+    final animationsDisabled = MediaQuery.disableAnimationsOf(context);
+    if (!animationsDisabled &&
+        (widget.phase == SearchPhase.idle ||
+            widget.phase == SearchPhase.searching)) {
+      motion.duration = widget.phase == SearchPhase.searching
+          ? const Duration(milliseconds: 850)
+          : const Duration(milliseconds: 3200);
       motion.repeat(reverse: true);
     } else if (widget.phase == SearchPhase.found &&
-        !MediaQuery.disableAnimationsOf(context)) {
+        !animationsDisabled) {
+      motion.duration = const Duration(milliseconds: 900);
       motion.forward(from: 0);
     } else {
       motion.stop();
@@ -1597,21 +1603,42 @@ class BotPainter extends CustomPainter {
     paint.color = const Color(0xFFE9E5DE);
     c.drawOval(const Rect.fromLTWH(42, 162, 146, 12), paint);
     final searching = phase == SearchPhase.searching;
+    final idle = phase == SearchPhase.idle;
     final happy = phase == SearchPhase.found;
+    // In the idle loop the bot has a small character beat: look at the user,
+    // hop into the box, rummage around, then pop back up and look forward.
+    final idleCycle = t * 2;
+    final idleSearching = idle && idleCycle > .55 && idleCycle < 1.55;
+    final idleProgress = idleSearching
+        ? ((idleCycle - .55) / 1.0).clamp(0.0, 1.0)
+        : 0.0;
+    final rummage = idleSearching
+        ? math.sin(idleProgress * math.pi * 3) * 4
+        : 0.0;
+    final bodyDrop = idleSearching
+        ? (math.sin(idleProgress * math.pi) * 24) + rummage
+        : idle
+        ? math.sin(t * math.pi * 2) * 2
+        : 0.0;
     final bob = searching
         ? math.sin(t * math.pi * 2) * 6
         : happy
         ? -math.sin(t * math.pi) * 8
-        : 0.0;
-    // A robot dips into the open box, looking left and right.
+        : bodyDrop;
+    final isLookingInBox = searching || idleSearching;
     c.save();
-    c.translate(searching ? (t - .5) * 12 : 0, searching ? 27 + bob : bob);
+    c.translate(
+      isLookingInBox ? (math.sin(t * math.pi * 6) * 6) : 0,
+      isLookingInBox ? (searching ? 27 + bob : bob) : bob,
+    );
     line(const Offset(109, 49), const Offset(109, 35), ink, 3);
     paint.color = const Color(0xFFDF8869);
     c.drawCircle(const Offset(109, 32), 5, paint);
     rect(const Rect.fromLTWH(65, 49, 88, 58), violet, 18);
     rect(const Rect.fromLTWH(76, 60, 66, 33), const Color(0xFF293E43), 12);
-    final eyes = searching ? (t - .5) * 9 : 0.0;
+    final eyes = isLookingInBox
+        ? math.sin((idle ? idleProgress : t) * math.pi * 4) * 9
+        : 0.0;
     for (final x in [94.0, 124.0]) {
       if (happy) {
         line(Offset(x - 4, 74), Offset(x, 70), const Color(0xFFE5F5CF), 2);
@@ -1622,10 +1649,15 @@ class BotPainter extends CustomPainter {
       }
     }
     rect(const Rect.fromLTWH(84, 108, 50, 32), violet, 12);
-    line(const Offset(84, 115), Offset(56, searching ? 140 : 120), violet, 9);
+    line(
+      const Offset(84, 115),
+      Offset(56, isLookingInBox ? 140 : 120),
+      violet,
+      9,
+    );
     line(
       const Offset(134, 115),
-      Offset(happy ? 169 : 160, happy ? 86 : 137),
+      Offset(happy ? 169 : 160, happy ? 86 : isLookingInBox ? 140 : 137),
       violet,
       9,
     );

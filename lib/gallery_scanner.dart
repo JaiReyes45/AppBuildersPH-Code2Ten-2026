@@ -12,6 +12,10 @@ import 'gallery_asset_source.dart';
 
 const _pageSize = 24;
 const kThumbnailLongEdge = 800;
+final RegExp _thumbnailAmountPattern = RegExp(
+  r'(?<![A-Za-z0-9,])(?:PHP\s*|P\s*|₱\s*)?([\d,]+)(?:\.(\d{1,2}))?(?![A-Za-z0-9,])',
+  caseSensitive: false,
+);
 
 class GalleryOcrResult {
   const GalleryOcrResult(this.blocks);
@@ -1011,11 +1015,14 @@ class GalleryScanner {
       RegExp(r'\s+'),
       ' ',
     );
-    for (final keyword in query.keywords) {
-      if (!RegExp(
-        '(?<![a-z0-9])${RegExp.escape(keyword.toLowerCase())}(?![a-z0-9])',
-      ).hasMatch(normalizedText)) {
-        return false;
+    final hasStructuredFilter = query.category != null || query.amount != null;
+    if (!hasStructuredFilter) {
+      for (final keyword in query.keywords) {
+        if (!RegExp(
+          '(?<![a-z0-9])${RegExp.escape(keyword.toLowerCase())}(?![a-z0-9])',
+        ).hasMatch(normalizedText)) {
+          return false;
+        }
       }
     }
 
@@ -1037,11 +1044,7 @@ class GalleryScanner {
       ),
     );
     if (query.amount != null &&
-        !screenshot.fields.any(
-          (field) =>
-              field.type == ExtractedFieldType.amount &&
-              field.normalizedValue == query.amount,
-        )) {
+        !_hasMatchingAmount(normalizedText, screenshot, query.amount!)) {
       return false;
     }
     if (query.exactIdentifier != null) {
@@ -1060,7 +1063,6 @@ class GalleryScanner {
       }
     }
     if (query.category != null &&
-        screenshot.category != query.category &&
         !_hasCategoryClue(normalizedText, query.category!)) {
       return false;
     }
@@ -1069,17 +1071,53 @@ class GalleryScanner {
 
   bool _hasCategoryClue(String text, HelpdeskCategory category) =>
       switch (category) {
-        HelpdeskCategory.gcashReceipt => RegExp(
-          r'\b(gcash|receipt|payment|money sent)\b',
-        ).hasMatch(text),
-        HelpdeskCategory.order => RegExp(
-          r'\b(order|ordered|checkout|delivery|product|item)\b',
-        ).hasMatch(text),
-        HelpdeskCategory.announcement => RegExp(
-          r'\b(announcement|deadline|due date|student|class)\b',
-        ).hasMatch(text),
-        HelpdeskCategory.other || HelpdeskCategory.unknown => false,
+        HelpdeskCategory.gcashReceipt => const [
+          'gcash',
+          'money sent',
+          'sent to',
+          'ref no',
+          'reference',
+          'php',
+          '₱',
+          'amount',
+          'received',
+        ].any(text.contains),
+        HelpdeskCategory.order => const [
+          'order',
+          'total',
+          'checkout',
+          'shipped',
+          'quantity',
+        ].any(text.contains),
+        HelpdeskCategory.announcement => const [
+          'deadline',
+          'due',
+          'submit',
+          'announcement',
+          'class',
+        ].any(text.contains),
+        HelpdeskCategory.other || HelpdeskCategory.unknown => true,
       };
+
+  bool _hasMatchingAmount(
+    String text,
+    AnalyzedScreenshot screenshot,
+    String expected,
+  ) {
+    if (screenshot.fields.any(
+      (field) =>
+          field.type == ExtractedFieldType.amount &&
+          field.normalizedValue == expected,
+    )) {
+      return true;
+    }
+    return _thumbnailAmountPattern.allMatches(text).any((match) {
+      final whole = match.group(1)!.replaceAll(',', '');
+      final decimals = (match.group(2) ?? '').replaceFirst(RegExp(r'0+$'), '');
+      final normalized = decimals.isEmpty ? whole : '$whole.$decimals';
+      return normalized == expected;
+    });
+  }
 
   String _normalizeIdentifier(String value) =>
       value.trim().toLowerCase().replaceAll(RegExp(r'\s+'), '');

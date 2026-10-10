@@ -18,8 +18,15 @@ class _CountingStorage extends SearchMemoryStorage {
 }
 
 class _StagedScanner extends GalleryScanner {
-  _StagedScanner(_CountingStorage storage, FakeAssetSource source)
-    : super(initialStorage: storage, assetSource: source);
+  _StagedScanner(
+    _CountingStorage storage,
+    FakeAssetSource source, {
+    this.thumbnailTexts = const {},
+    this.fullTexts = const {},
+  }) : super(initialStorage: storage, assetSource: source);
+
+  final Map<String, String> thumbnailTexts;
+  final Map<String, String> fullTexts;
 
   int thumbnailCalls = 0;
   int fullResCalls = 0;
@@ -37,9 +44,11 @@ class _StagedScanner extends GalleryScanner {
     return GalleryOcrResult([
       GalleryScanBlock(
         id: 'thumbnail',
-        text: imagePath == 'match'
-            ? 'Diancie card collection'
-            : 'ordinary unrelated screenshot',
+        text:
+            thumbnailTexts[imagePath] ??
+            (imagePath == 'match'
+                ? 'Diancie card collection'
+                : 'ordinary unrelated screenshot'),
       ),
     ]);
   }
@@ -51,9 +60,11 @@ class _StagedScanner extends GalleryScanner {
     return GalleryOcrResult([
       GalleryScanBlock(
         id: 'full',
-        text: imagePath == 'match'
-            ? 'Diancie card collection full resolution'
-            : 'ordinary unrelated screenshot full resolution',
+        text:
+            fullTexts[imagePath] ??
+            (imagePath == 'match'
+                ? 'Diancie card collection full resolution'
+                : 'ordinary unrelated screenshot full resolution'),
         left: 10,
         top: 20,
         width: 100,
@@ -106,6 +117,46 @@ void main() {
       isTrue,
     );
   });
+
+  test(
+    'structured thumbnail filters use soft keywords and exact amounts',
+    () async {
+      final ai = GalleryHelpdeskAi();
+      final matchingStorage = _CountingStorage();
+      final matching = _StagedScanner(
+        matchingStorage,
+        FakeAssetSource([fakeAsset('receipt-500', DateTime(2026, 10, 10))]),
+        thumbnailTexts: const {
+          'receipt-500': 'Money Sent\nSent to Maria\n500.00',
+        },
+        fullTexts: const {'receipt-500': 'Money Sent\nSent to Maria\n500.00'},
+      );
+
+      await matching
+          .scanUpTo(
+            additionalCount: 1,
+            currentQuery: ai.parseQuery('GCash 500'),
+          )
+          .toList();
+
+      expect(matching.fullResCalls, 1);
+      expect(matchingStorage.data['receipt-500']?['status'], 'complete');
+
+      final wrongStorage = _CountingStorage();
+      final wrong = _StagedScanner(
+        wrongStorage,
+        FakeAssetSource([fakeAsset('receipt-2500', DateTime(2026, 10, 10))]),
+        thumbnailTexts: const {'receipt-2500': 'Money Sent\nP2,500'},
+      );
+
+      await wrong
+          .scanUpTo(additionalCount: 1, currentQuery: ai.parseQuery('500'))
+          .toList();
+
+      expect(wrong.fullResCalls, 0);
+      expect(wrongStorage.data['receipt-2500']?['status'], 'thumbnail');
+    },
+  );
 
   test(
     'query scan promotes only matching thumbnail and halves measured work',

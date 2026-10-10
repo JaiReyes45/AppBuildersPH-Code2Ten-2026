@@ -280,6 +280,31 @@ void main() {
     expect(find.text('PHP 2,500.00'), findsNothing);
   });
 
+  testWidgets('bare 500 does not match the suffix of P2,500', (tester) async {
+    final storage = SearchMemoryStorage();
+    await storage.saveRecord(
+      fakeRecord(
+        'receipt-2500',
+        DateTime(2026, 10, 10),
+        text: 'GCash\nPayment successful\nP2,500',
+      ).toJson(),
+    );
+    await tester.pumpWidget(
+      GalleryHelpdeskApp(
+        scanner: FakeOcrScanner(storage, FakeAssetSource([])),
+        autoScanGallery: false,
+        showDemoContent: false,
+      ),
+    );
+
+    await submit(tester, '500');
+    await tester.fling(pageScroll, const Offset(0, -2000), 2000);
+    await tester.pumpAndSettle();
+
+    expect(find.byType(EvidenceCard), findsNothing);
+    expect(find.text('P2,500'), findsNothing);
+  });
+
   testWidgets('welcome completes with reduced motion and enlarged text', (
     tester,
   ) async {

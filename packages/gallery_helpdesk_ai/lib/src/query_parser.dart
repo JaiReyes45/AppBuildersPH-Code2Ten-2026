@@ -3,6 +3,10 @@ import 'normalization.dart';
 import 'typo_matching.dart';
 
 class HelpdeskQueryParser {
+  static final RegExp _standaloneAmountPattern = RegExp(
+    r'^\s*(?:PHP\s*|P\s*|₱\s*)?([\d,]+(?:\.\d{1,2})?)\s*$',
+    caseSensitive: false,
+  );
   static final RegExp _bareAmountPattern = RegExp(
     r'(?<![A-Za-z0-9-])([\d,]+(?:\.\d{1,2})?)(?![A-Za-z0-9-])',
   );
@@ -93,7 +97,6 @@ class HelpdeskQueryParser {
     'gcash',
     'receipt',
     'receipts',
-    'order',
     'orders',
     'number',
     'reference',
@@ -144,12 +147,25 @@ class HelpdeskQueryParser {
     final hasReceiptContext =
         lower.contains('gcash') || lower.contains('receipt');
     final amountMatch = amountWithCurrencyPattern.firstMatch(text);
+    var standaloneAmountText = text;
+    for (final stopWord in _ignoredWords) {
+      standaloneAmountText = standaloneAmountText.replaceAll(
+        RegExp('\\b${RegExp.escape(stopWord)}\\b', caseSensitive: false),
+        ' ',
+      );
+    }
+    final standaloneAmountMatch = _standaloneAmountPattern.firstMatch(
+      standaloneAmountText,
+    );
     final textWithoutIdentifiers = text
         .replaceAll(_referencePattern, ' ')
         .replaceAll(_transactionIdPattern, ' ')
         .replaceAll(_orderPattern, ' ');
-    final bareAmountMatch = amountMatch == null && hasReceiptContext
-        ? _bareAmountPattern.firstMatch(textWithoutIdentifiers)
+    final bareAmountMatch = amountMatch == null
+        ? standaloneAmountMatch ??
+              (hasReceiptContext
+                  ? _bareAmountPattern.firstMatch(textWithoutIdentifiers)
+                  : null)
         : null;
     final amountValue =
         amountMatch?.group(1) ??

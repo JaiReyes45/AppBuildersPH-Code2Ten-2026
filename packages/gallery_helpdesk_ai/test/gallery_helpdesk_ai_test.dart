@@ -182,6 +182,22 @@ void main() {
       expect(query.exactIdentifier, isNull);
     });
 
+    test('promotes only standalone numeric queries to amount filters', () {
+      for (final text in ['500', 'P500', '₱500']) {
+        final query = pipeline.parseQuery(text);
+        expect(query.amount, '500', reason: text);
+        expect(query.keywords, isEmpty, reason: text);
+      }
+
+      final order = pipeline.parseQuery('order 500');
+      expect(order.amount, isNull);
+      expect(order.keywords, containsAll(['order', '500']));
+
+      final gcash = pipeline.parseQuery('gcash 500');
+      expect(gcash.amount, '500');
+      expect(gcash.keywords, ['gcash']);
+    });
+
     test('retrieves amount matches and cites the matching OCR block', () async {
       final receipt = pipeline.analyze(
         const OcrScreenshot(

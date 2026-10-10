@@ -61,6 +61,8 @@ class HelpdeskQueryParser {
     'peso',
     'php',
     'called',
+    'named',
+    'titled',
     'a',
     'an',
     'and',
@@ -205,9 +207,6 @@ class HelpdeskQueryParser {
             .toList()
           ..sort();
 
-    if (keywords.length > 1) {
-      keywords.removeWhere((w) => w == 'card' || w == 'cards');
-    }
     return HelpdeskQuery(
       originalText: text,
       intent: intent,

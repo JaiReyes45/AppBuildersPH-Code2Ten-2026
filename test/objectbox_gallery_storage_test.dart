@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gallery_helpdesk/data/objectbox_entities.dart';
 import 'package:gallery_helpdesk/data/objectbox_gallery_storage.dart';
@@ -34,11 +35,13 @@ void main() {
     String? imagePath,
     String status = 'complete',
     DateTime? scannedAt,
+    DateTime? assetCreatedAt,
   }) => GalleryScanRecord(
     assetId: id,
     displayName: 'synthetic.png',
     status: status,
     scannedAt: scannedAt ?? DateTime.utc(2026, 10, 9, 12, 0, 0, 123, 456),
+    assetCreatedAt: assetCreatedAt,
     imagePath: imagePath,
     error: status == 'failed' ? 'Synthetic failure' : null,
     blocks: const [
@@ -160,6 +163,66 @@ void main() {
       expect(
         () => store.screenshots.put(duplicate),
         throwsA(isA<UniqueViolationException>()),
+      );
+    },
+  );
+
+  test('counts and asset IDs exclude failed records', () async {
+    await storage.saveRecord(record('complete'));
+    await storage.saveRecord(record('failed', status: 'failed'));
+    expect(await storage.count(), 1);
+    expect(await storage.allAssetIds(), {'complete'});
+  });
+
+  test('coverage is exact-range additive and survives reopen', () async {
+    final range = DateTimeRange(
+      start: DateTime.utc(2026, 10, 1),
+      end: DateTime.utc(2026, 10, 31, 23, 59, 59, 999),
+    );
+    await storage.upsertCoverage(range, 300);
+    await storage.upsertCoverage(range, 12);
+    expect(await storage.coverageCount(range), 312);
+    expect(await storage.coverageCount(null), 0);
+    await reopen();
+    expect(await storage.coverageCount(range), 312);
+    expect(
+      await storage.coverageCount(
+        DateTimeRange(
+          start: range.start,
+          end: range.end.subtract(const Duration(milliseconds: 1)),
+        ),
+      ),
+      0,
+    );
+  });
+
+  test(
+    'asset creation timestamp persists and clear removes coverage',
+    () async {
+      final created = DateTime.utc(2026, 10, 8, 8, 7, 6);
+      await storage.saveRecord(record('dated', assetCreatedAt: created));
+      expect(
+        DateTime.parse(
+          (await storage.loadRecords()).single['assetCreatedAt'] as String,
+        ).toUtc(),
+        created,
+      );
+      await storage.upsertCoverage(
+        DateTimeRange(
+          start: created,
+          end: created.add(const Duration(days: 1)),
+        ),
+        1,
+      );
+      await storage.clear();
+      expect(
+        await storage.coverageCount(
+          DateTimeRange(
+            start: created,
+            end: created.add(const Duration(days: 1)),
+          ),
+        ),
+        0,
       );
     },
   );

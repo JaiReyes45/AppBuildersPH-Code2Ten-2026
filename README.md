@@ -7,7 +7,7 @@ Created by **Ralph Abaya, Kyle Israel Concepcion, Patrick Gengania, and Guienne 
 ## Current build ? October 10, 2026
 
 - SSeeker branding, cream/purple visual theme, skippable photo/magnifier opening, and the original searching-box/ta-da chatbot animation.
-- Purple-arrow searches request Android photo access, check cached records, then scan new images in bounded batches. No upload or photo picker. Optional **Scan gallery** indexes the accessible library, with pause and retry controls.
+- Purple-arrow searches request Android photo access only when a real gallery search needs it, check cached records first, then scan up to 300 additional images per pass. If no real gallery match is found, the search deepens automatically up to three more passes (1200 attempted images maximum); **Search deeper (add 300 more)** continues manually after that. Demo examples never stop a real-gallery search. No upload or photo picker. Optional **Scan gallery** indexes the accessible library, with pause and retry controls.
 - Screenshot filenames are prioritized. A saved metadata catalog resumes completed work; unchanged indexed assets skip OCR. New/edited timestamp or dimension changes are checked incrementally, with daily full reconciliation.
 - Bundled ML Kit Text Recognition v2 (Latin) extracts text. Reduced-size OCR retries at original resolution on sparse/tiny-text results or failure; source copies and OCR coordinates retain original dimensions.
 - Sentence parsing, amounts/date hints, whole-word search, exact identifiers/quoted constraints, and cautious spelling tolerance. Structured evidence responses keep raw OCR in the detail view.
@@ -102,7 +102,9 @@ Model provenance, hashes, license, tokenizer, and weights are in `assets/models/
 - Semantic thresholds are heuristic and have not been calibrated against a labeled gallery benchmark. Similarity is not proof of an exact screenshot or payment authenticity.
 - Small/blurry text can still be missed. Resize/encoding cost needs measurement across varied images.
 - Timestamp-based change detection can miss edits when metadata is unchanged; permission/deletion reconciliation and retained private copies need explicit product decisions.
+- Search date hints filter by gallery asset creation time, not the transaction/event date printed inside a screenshot. Date matching uses the device's local calendar with Monday as the week start; legacy or picker records without asset timestamps are excluded from date-filtered real-gallery results.
+- Automatic query scanning is capped at 1200 attempted images (four 300-image passes). Failed OCR assets are excluded from counts and coverage, retried on a later search, and not repeated in another pass of the same search. Coverage is recorded for exact requested date ranges; overlapping ranges are intentionally not merged.
 - Reminder UI is a preview; notification scheduling/delivery is unfinished. Individual-record deletion has storage APIs but no final UI.
-- Local storage is not automatically encrypted. No perfect relevance, full-library benchmark, or release airplane-mode acceptance is claimed.
+- Local storage is not automatically encrypted. No perfect relevance, full-library benchmark, device-specific OCR accuracy, or release airplane-mode acceptance is claimed.
 
 Collaborators: read **[NEXT_BUILD.md](NEXT_BUILD.md)** for changes, suggested four-person ownership, priorities, and acceptance criteria. [TEAM.md](TEAM.md) preserves the original role plan; [PROJECT_HISTORY.md](PROJECT_HISTORY.md) preserves earlier planning and happy-path/edge-case targets. [PREVIEW.md](PREVIEW.md) contains the visual guide; older preview images may differ from the latest folders.

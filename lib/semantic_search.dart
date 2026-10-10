@@ -9,6 +9,32 @@ import 'semantic_store.dart';
 String textFingerprint(String text) =>
     sha256.convert(utf8.encode(text)).toString();
 
+/// Semantic expansion must not turn a total unstructured OCR miss into an
+/// unrelated result. Structured filters are safe anchors; otherwise require
+/// at least one whole query keyword to occur in the indexed OCR corpus.
+bool hasSemanticSearchAnchor(
+  HelpdeskQuery query,
+  Iterable<AnalyzedScreenshot> documents,
+) {
+  if (query.category != null ||
+      query.amount != null ||
+      query.exactIdentifier != null ||
+      query.requiredPhrases.isNotEmpty) {
+    return true;
+  }
+  for (final keyword in query.keywords) {
+    final pattern = RegExp(
+      '(?<![a-z0-9])${RegExp.escape(keyword)}(?![a-z0-9])',
+    );
+    if (documents.any(
+      (document) => pattern.hasMatch(document.recognizedText.toLowerCase()),
+    )) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /// Local inference and explicit relevance feedback. OCR is untrusted evidence.
 class SemanticSearch {
   final TextEmbedder embedder;

@@ -623,7 +623,8 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     if ((galleryAnswer.sources.isEmpty || indexMore) &&
         _semantic != null &&
-        gallery.isNotEmpty) {
+        gallery.isNotEmpty &&
+        hasSemanticSearchAnchor(parsed, gallery)) {
       final ticket = request;
       final related = await _semantic!.search(
         parsed,

@@ -320,6 +320,33 @@ void main() {
     );
     expect(find.text('Wireless headphones'), findsOneWidget);
   });
+
+  testWidgets('unconstrained no-match query does not browse unrelated OCR', (
+    tester,
+  ) async {
+    final storage = SearchMemoryStorage();
+    final record = fakeRecord(
+      'whitecloak',
+      DateTime(2026, 10, 10),
+      text: 'WHITECLOAK\nWHITECLOA\ncharizard',
+    );
+    await storage.saveRecord(record.toJson());
+    final scanner = FakeOcrScanner(storage, FakeAssetSource([]));
+    await tester.pumpWidget(
+      GalleryHelpdeskApp(
+        scanner: scanner,
+        autoScanGallery: false,
+        showDemoContent: false,
+      ),
+    );
+
+    await submit(tester, 'unicorn dragon');
+    await tester.fling(pageScroll, const Offset(0, -2000), 2000);
+    await tester.pumpAndSettle();
+
+    expect(find.byType(EvidenceCard), findsNothing);
+    expect(find.text('WHITECLOAK'), findsNothing);
+  });
   testWidgets('AI response is shown with source-backed details', (
     tester,
   ) async {

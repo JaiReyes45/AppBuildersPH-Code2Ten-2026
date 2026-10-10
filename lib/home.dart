@@ -732,9 +732,10 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final browsing =
-        phase == SearchPhase.idle || phase == SearchPhase.uncertain;
+        phase == SearchPhase.idle ||
+        (phase == SearchPhase.uncertain && !_semanticUsed && category != 'All');
     final evidence = _availableEvidence;
-    final visible = (browsing && !_semanticUsed ? evidence : matches)
+    final visible = (browsing ? evidence : matches)
         .where((e) => category == 'All' || e.category == category)
         .toList();
     final title = switch (phase) {

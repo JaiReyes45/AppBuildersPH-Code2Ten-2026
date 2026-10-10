@@ -2,6 +2,35 @@ import 'models.dart';
 import 'typo_matching.dart';
 
 class SearchService {
+  static const _contextWords = {'card', 'cards'};
+
+  /// Returns query keywords that have no exact or typo-tolerant OCR hit in
+  /// [screenshots]. This is a retrieval signal; it does not apply category,
+  /// amount, or identifier constraints.
+  Set<String> zeroHitTokens(
+    HelpdeskQuery query,
+    Iterable<AnalyzedScreenshot> screenshots,
+  ) {
+    final corpus = screenshots.toList(growable: false);
+    return {
+      for (final keyword in query.keywords)
+        if (!_contextWords.contains(keyword))
+          if (!corpus.any(
+            (screenshot) => screenshot.blocks.any((block) {
+              final lower = block.text.toLowerCase();
+              if (RegExp('(?<![a-z0-9])${RegExp.escape(keyword)}(?![a-z0-9])')
+                  .hasMatch(lower)) {
+                return true;
+              }
+              return RegExp(r'[a-z0-9]+')
+                  .allMatches(lower)
+                  .any((match) => nearWord(keyword, match[0]!));
+            }),
+          ))
+            keyword,
+    };
+  }
+
   List<SearchMatch> search(
     HelpdeskQuery query,
     Iterable<AnalyzedScreenshot> screenshots, {
@@ -43,6 +72,7 @@ class SearchService {
 
       final matchingBlocks = <String>{};
       var keywordHits = 0;
+      var requiredHits = 0;
       var approximate = false;
       for (final keyword in query.keywords) {
         var blocks = screenshot.blocks
@@ -65,12 +95,16 @@ class SearchService {
         }
         if (blocks.isNotEmpty) {
           keywordHits++;
+          if (!_contextWords.contains(keyword)) requiredHits++;
           matchingBlocks.addAll(blocks.map((block) => block.id));
         }
       }
 
       // Exact amounts/IDs do not cancel the remaining request details.
-      if (query.keywords.isNotEmpty && keywordHits < query.keywords.length) {
+      final requiredKeywordCount = query.keywords
+          .where((keyword) => !_contextWords.contains(keyword))
+          .length;
+      if (requiredKeywordCount > 0 && requiredHits < requiredKeywordCount) {
         continue;
       }
 

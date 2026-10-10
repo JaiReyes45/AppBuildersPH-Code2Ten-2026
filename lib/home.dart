@@ -490,8 +490,25 @@ class _HomeScreenState extends State<HomeScreen> {
         );
         return;
       }
+      if (!manual &&
+          scanner.records.any((record) => !record.isFailed) &&
+          _zeroHitTokens(parsed, dateHint).isNotEmpty) {
+        outcome = await _searchWith(parsed, dateHint);
+        if (!mounted || ticket != request) return;
+        if (outcome.galleryMatches.isNotEmpty) {
+          _showResults(
+            outcome,
+            parsed,
+            allowDeeper: scanner.isSupported,
+            message: 'Ready â€” found a related indexed photo.',
+          );
+          return;
+        }
+      }
       scanner.refreshCatalog();
       final attempted = <String>{};
+      var scanExtensions = 0;
+      const maxScanExtensions = 3;
       for (var batch = 0; ; batch++) {
         if (!mounted || ticket != request) return;
         setState(() {
@@ -529,17 +546,29 @@ class _HomeScreenState extends State<HomeScreen> {
           outcome = await _searchWith(parsed, dateHint);
           if (!mounted || ticket != request) return;
         }
-        if (outcome.galleryMatches.isNotEmpty || !hasMore || manual) {
+        if (outcome.galleryMatches.isEmpty && hasMore) {
+          final zeroHits = _zeroHitTokens(parsed, dateHint);
+          if (zeroHits.isNotEmpty) {
+            outcome = await _searchWith(parsed, dateHint);
+            if (!mounted || ticket != request) return;
+          }
+        }
+        final reachedScanCap = scanExtensions >= maxScanExtensions;
+        if (outcome.galleryMatches.isNotEmpty ||
+            !hasMore ||
+            manual ||
+            reachedScanCap) {
           final message = !ready
               ? last?.message ?? 'Scan stopped.'
               : outcome.galleryMatches.isNotEmpty
               ? 'Ready'
-              : hasMore
+              : hasMore && !reachedScanCap
               ? 'No matching gallery photos yet. You can search deeper.'
-              : 'No matches found in accessible indexed photos. Failed photos may need retry.';
+              : 'No matching gallery photos found in the first 160 images. Failed photos may need retry.';
           _showResults(outcome, parsed, allowDeeper: hasMore, message: message);
           return;
         }
+        scanExtensions++;
       }
     } catch (error) {
       if (!mounted || ticket != request) return;
@@ -549,6 +578,28 @@ class _HomeScreenState extends State<HomeScreen> {
         status = 'Could not complete search: $error';
       });
     }
+  }
+
+  Set<String> _zeroHitTokens(HelpdeskQuery parsed, DateTimeRange? dateHint) {
+    final dates = {
+      for (final record in scanner.records)
+        record.assetId: record.assetCreatedAt,
+    };
+    final gallery = <AnalyzedScreenshot>[];
+    for (final entry in _analyzedGallery.entries) {
+      final assetId = entry.key.startsWith('gallery-')
+          ? entry.key.substring('gallery-'.length)
+          : entry.key;
+      final created = dates[assetId];
+      if (dateHint != null &&
+          (created == null ||
+              created.isBefore(dateHint.start) ||
+              created.isAfter(dateHint.end))) {
+        continue;
+      }
+      gallery.add(entry.value);
+    }
+    return SearchService().zeroHitTokens(parsed, gallery);
   }
 
   Future<_SearchOutcome> _searchWith(
@@ -1252,8 +1303,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   TextButton(
                     onPressed: scanner.isRunning
                         ? null
-                        : () => handleSearch(_lastQuery, additionalCount: 120),
-                    child: const Text('Search deeper (add 120 more)'),
+                        : () => handleSearch(_lastQuery, additionalCount: 300),
+                    child: const Text('Search deeper (add 300 more)'),
                   ),
               ],
               if (scanner.isSupported) ...[
@@ -1351,16 +1402,7 @@ class _HomeScreenState extends State<HomeScreen> {
             'Scans stay on this device. Clear scan removes the app’s copies and OCR data.',
             style: TextStyle(fontSize: 11, color: Colors.black54),
           ),
-          if (scanning) ...[
-            const SizedBox(height: 8),
-            const Text('Scanning on this device. Nothing leaves your phone.'),
-            Text('$scannedCount / $targetCount'),
-            LinearProgressIndicator(
-              value: targetCount == 0
-                  ? null
-                  : (scannedCount / targetCount).clamp(0.0, 1.0),
-            ),
-          ] else if (scanProgress.isScanning) ...[
+          if (scanProgress.isScanning && !scanning) ...[
             const SizedBox(height: 10),
             LinearProgressIndicator(value: running ? scanProgress.fraction : 1),
           ],

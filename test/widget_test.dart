@@ -217,6 +217,28 @@ void main() {
     expect(scanner.processedIds.length, 40);
   });
 
+  testWidgets('zero-hit queries stop after three scan extensions', (
+    tester,
+  ) async {
+    final scanner = FakeOcrScanner(
+      SearchMemoryStorage(),
+      FakeAssetSource(
+        List.generate(
+          300,
+          (i) => fakeAsset('$i', DateTime(2026, 10, 10, 0, 0, 300 - i)),
+        ),
+      ),
+    );
+    await tester.pumpWidget(
+      GalleryHelpdeskApp(scanner: scanner, showDemoContent: false),
+    );
+    await submit(tester, 'unicorn dragon');
+
+    expect(scanner.batchSizes, [40, 40, 40, 40]);
+    expect(scanner.processedIds, hasLength(160));
+    expect(scanner.batchSizes, isNot(contains(80)));
+  });
+
   testWidgets('welcome completes with reduced motion and enlarged text', (
     tester,
   ) async {

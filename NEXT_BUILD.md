@@ -1,5 +1,16 @@
 # Code2Ten collaborator handoff ? October 10, 2026
+## Session 3 known gaps (Oct 10)
 
+1. **Yes stops the scan immediately** — user only sees the accepted image.
+   If they want related matches, they must re-run the query and tap No
+   repeatedly. Consider a post-accept "Find related matches" button.
+
+2. **Scan cap of 160 images** may not reach all matches on a 600+ gallery.
+   Session 4's query-aware priority is expected to help.
+
+3. **Thumbnail OCR at 800px may miss small text** — if Diancie #2/#3 have
+   smaller or lower-contrast card names than #1, they wouldn't promote.
+   Diagnostic logging to add in Session 4.
 ## What changed in this commit
 
 SSeeker branding and information/team screen; Balik-inspired UI and magnifier opening; preserved chatbot animations; cleaned greeting/demo controls; gallery search without uploads/picker; structured OCR responses; sentence/typo handling; bundled MiniLM semantic retrieval and confirmed-query memory; ObjectBox vectors and shared-store lifecycle fixes; screenshot-first incremental scan catalog; resized OCR with fallback; stage timing diagnostics; compact gallery folders and persistent frequent-query shortcuts. README now describes the current build rather than mixing historical targets with completed work.

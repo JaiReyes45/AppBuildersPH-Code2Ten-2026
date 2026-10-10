@@ -67,3 +67,29 @@ The typo test proves the parser and matcher work when tokens are findable. The f
 **Impact:** Compound natural-language queries are the primary UX judges will try. The `screenshit of charizard card` result shows the pipeline *can* work — the gap is specifically zero-hit framing words.
 
 **Workaround for demo:** Tap **This is the one** on a `Diancie` result once, then re-run the compound query — memory should short-circuit the scan. (Not yet verified.)
+
+
+---
+
+## Follow-up needed — zero-hit short-circuit doesn't trigger semantic search
+
+**Found by Kyle on branch `fix/zero-hit-semantic-fallback`, Oct 10.**
+
+**What works on this branch:**
+- `Diancie` → 3 results, instant ✅
+- `screenshit of charizard card` → 1 result, instant ✅
+- Scan cap at 3 extensions (160 images max) works ✅
+
+**What still fails:**
+- `pokemon card called Diancie` → still scans, doesn't return the Diancie card
+- `unicorn dragon` (no matching images) → returns WHITECLOAK photos (neither word in OCR)
+
+**Root cause (probable):**
+The short-circuit at `home.dart:494-503` calls `_searchWith(parsed, dateHint)` with default `prepareSemantic: true` (line 609). But `_searchWith` appears to run semantic retrieval against *currently computed* embeddings, while prep at line 683 (`prepareMissing: prepareSemantic`) is queued asynchronously. So the search returns before prep completes — finds nothing — and the outer loop falls through to scanning.
+
+**Requested fix (Priority 2 — search/data):**
+1. Await semantic prep before running the search inside the zero-hit short-circuit branch (or return after prep completes and re-search).
+2. Fix `nearWord` fuzzy matching so `unicorn` / `dragon` don't spuriously match `WHITECLOAK`.
+3. Verify `pokemon card called Diancie` returns the Diancie card without further scanning on a 600+ image gallery.
+
+**Branch context:** `fix/zero-hit-semantic-fallback` at commit [push hash]. Preserve `card`/`cards` as context words (`_contextWords` in `search_service.dart`); do not re-add the parser-level stripping.

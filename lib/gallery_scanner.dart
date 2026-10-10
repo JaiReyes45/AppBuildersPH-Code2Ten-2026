@@ -3,6 +3,7 @@ import 'scan_timings.dart';
 import 'ocr_input.dart';
 
 import 'package:flutter/foundation.dart';
+import 'package:gallery_helpdesk_ai/gallery_helpdesk_ai.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:photo_manager/photo_manager.dart';
 
@@ -10,6 +11,25 @@ import 'gallery_storage.dart';
 import 'gallery_asset_source.dart';
 
 const _pageSize = 24;
+const kThumbnailLongEdge = 800;
+
+class GalleryOcrResult {
+  const GalleryOcrResult(this.blocks);
+
+  final List<GalleryScanBlock> blocks;
+  String get recognizedText => blocks.map((block) => block.text).join('\n');
+}
+
+class _PipelineStats {
+  int thumbnails = 0;
+  int promoted = 0;
+  int fullRes = 0;
+  int copies = 0;
+
+  @override
+  String toString() =>
+      '{thumbnails: $thumbnails, promoted: $promoted, fullRes: $fullRes, copies: $copies}';
+}
 
 bool get isGalleryScanningSupported =>
     !kIsWeb &&
@@ -75,6 +95,8 @@ class GalleryScanRecord {
   final DateTime? assetCreatedAt;
 
   bool get isFailed => status == 'failed';
+  bool get isThumbnailOnly => status == 'thumbnail';
+  bool get isSearchable => status == 'complete';
 
   String get recognizedText => blocks.map((block) => block.text).join('\n');
 
@@ -355,10 +377,11 @@ class GalleryScanner {
               a.createDateTime.isAfter(dateFilter.end))) {
         return false;
       }
+      final record = stored[a.id];
+      if (record?.isThumbnailOnly ?? false) return true;
       if (!indexed.contains(a.id)) return true;
       final version = _versions[a.id];
       if (version != null) return version != _version(a);
-      final record = stored[a.id];
       return record == null || a.modifiedDateTime.isAfter(record.scannedAt);
     }).toList();
     bool screenshot(AssetEntity a) => RegExp(
@@ -374,12 +397,18 @@ class GalleryScanner {
     return candidates.take(limit).toList();
   }
 
-  Future<void> scanSingleAsset(AssetEntity asset) async {
+  Future<String?> imagePathForAsset(AssetEntity asset) async =>
+      (await asset.file)?.path;
+
+  Future<void> scanSingleAsset(
+    AssetEntity asset, {
+    HelpdeskQuery? currentQuery,
+  }) async {
     try {
       final loading = Stopwatch()..start();
-      final image = await asset.file;
+      final imagePath = await imagePathForAsset(asset);
       ScanTimings.add('image_load', loading.elapsedMicroseconds);
-      if (image == null) {
+      if (imagePath == null) {
         await _saveFailed(
           asset.id,
           asset.title ?? 'Gallery image',
@@ -391,7 +420,8 @@ class GalleryScanner {
         await _processImage(
           asset.id,
           asset.title ?? 'Gallery image',
-          image.path,
+          imagePath,
+          currentQuery: currentQuery,
           assetCreatedAt: asset.createDateTime,
         );
       }
@@ -410,6 +440,7 @@ class GalleryScanner {
     required int additionalCount,
     DateTimeRange? dateFilter,
     Set<String>? attemptedAssetIds,
+    HelpdeskQuery? currentQuery,
   }) async* {
     if (additionalCount <= 0) throw ArgumentError.value(additionalCount);
     await initialize();
@@ -434,6 +465,8 @@ class GalleryScanner {
     var added = 0;
     var hasMore = false;
     final attempted = attemptedAssetIds ?? <String>{};
+    final pipelineStats = currentQuery == null ? null : _PipelineStats();
+    _pipelineStats = pipelineStats;
     try {
       if (!await _assetSource.requestPermission()) {
         await _publish(
@@ -470,7 +503,7 @@ class GalleryScanner {
       for (final asset in assets) {
         if (_cancelRequested) break;
         attempted.add(asset.id);
-        await scanSingleAsset(asset);
+        await scanSingleAsset(asset, currentQuery: currentQuery);
         processed++;
         final succeeded = _records.containsKey(asset.id)
             ? !_records[asset.id]!.isFailed
@@ -520,6 +553,9 @@ class GalleryScanner {
       try {
         await _saveCatalog();
         ScanTimings.report();
+        if (pipelineStats != null && kDebugMode) {
+          debugPrint('SSeeker pipeline: $pipelineStats');
+        }
         if (dateFilter != null && added > 0) {
           await _storage!.upsertCoverage(dateFilter, added);
         }
@@ -528,6 +564,7 @@ class GalleryScanner {
           await _closeRecognizer();
         } finally {
           _running = false;
+          _pipelineStats = null;
         }
       }
     }
@@ -535,7 +572,9 @@ class GalleryScanner {
 
   GalleryStorage? _storage;
   final Map<String, GalleryScanRecord> _records = {};
+  final GalleryHelpdeskAi _queryAi = GalleryHelpdeskAi();
   TextRecognizer? _recognizer;
+  _PipelineStats? _pipelineStats;
   bool _running = false;
   GalleryScanProgress _progress = const GalleryScanProgress();
 
@@ -884,86 +923,237 @@ class GalleryScanner {
     await _publish(const GalleryScanProgress(failed: 0), persist: false);
   }
 
+  Future<GalleryOcrResult> ocrThumbnail(String imagePath) => _ocrImage(
+    imagePath,
+    maxLongEdge: kThumbnailLongEdge,
+    retrySparseAtOriginalResolution: false,
+  );
+
+  Future<GalleryOcrResult> ocrFull(String imagePath) => _ocrImage(
+    imagePath,
+    maxLongEdge: 1600,
+    retrySparseAtOriginalResolution: true,
+  );
+
+  Future<GalleryOcrResult> _ocrImage(
+    String imagePath, {
+    required int maxLongEdge,
+    required bool retrySparseAtOriginalResolution,
+  }) async {
+    final recognizer = _recognizer ??= TextRecognizer(
+      script: TextRecognitionScript.latin,
+    );
+    final resizing = Stopwatch()..start();
+    OcrInput? input;
+    try {
+      input = await OcrInput.prepare(imagePath, maxLongEdge: maxLongEdge);
+    } catch (_) {
+      // If decoding fails, ML Kit may still understand the original image.
+    }
+    ScanTimings.add('resize', resizing.elapsedMicroseconds);
+    late RecognizedText result;
+    var scaleX = input?.scaleX ?? 1.0;
+    var scaleY = input?.scaleY ?? 1.0;
+    try {
+      try {
+        result = await recognizer.processImage(
+          InputImage.fromFilePath(input?.path ?? imagePath),
+        );
+      } catch (_) {
+        if (!retrySparseAtOriginalResolution || input?.resized != true) {
+          rethrow;
+        }
+        final retry = Stopwatch()..start();
+        result = await recognizer.processImage(
+          InputImage.fromFilePath(imagePath),
+        );
+        scaleX = scaleY = 1;
+        ScanTimings.add('ocr_full_retry', retry.elapsedMicroseconds);
+      }
+      final lines = result.blocks.expand((block) => block.lines).toList();
+      if (retrySparseAtOriginalResolution &&
+          input?.resized == true &&
+          scaleX != 1 &&
+          (result.text.trim().length < 24 ||
+              lines.length < 2 ||
+              lines.any((line) => line.boundingBox.height < 10))) {
+        final retry = Stopwatch()..start();
+        result = await recognizer.processImage(
+          InputImage.fromFilePath(imagePath),
+        );
+        scaleX = scaleY = 1;
+        ScanTimings.add('ocr_full_retry', retry.elapsedMicroseconds);
+      }
+    } finally {
+      await input?.close();
+    }
+    final blocks = <GalleryScanBlock>[];
+    for (final textBlock in result.blocks) {
+      for (final line in textBlock.lines) {
+        if (line.text.trim().isEmpty) continue;
+        blocks.add(
+          GalleryScanBlock(
+            id: 'ocr-block-${blocks.length}',
+            text: line.text.trim(),
+            left: line.boundingBox.left * scaleX,
+            top: line.boundingBox.top * scaleY,
+            width: line.boundingBox.width * scaleX,
+            height: line.boundingBox.height * scaleY,
+          ),
+        );
+      }
+    }
+    return GalleryOcrResult(List.unmodifiable(blocks));
+  }
+
+  bool matchesQuery(String ocrText, HelpdeskQuery query) {
+    final normalizedText = ocrText.toLowerCase().replaceAll(
+      RegExp(r'\s+'),
+      ' ',
+    );
+    for (final keyword in query.keywords) {
+      if (!RegExp(
+        '(?<![a-z0-9])${RegExp.escape(keyword.toLowerCase())}(?![a-z0-9])',
+      ).hasMatch(normalizedText)) {
+        return false;
+      }
+    }
+
+    final screenshot = _queryAi.analyze(
+      OcrScreenshot(
+        screenshotId: 'thumbnail-filter',
+        blocks: ocrText
+            .split('\n')
+            .asMap()
+            .entries
+            .where((entry) => entry.value.trim().isNotEmpty)
+            .map(
+              (entry) => OcrBlock(
+                id: 'thumbnail-block-${entry.key}',
+                text: entry.value.trim(),
+              ),
+            )
+            .toList(growable: false),
+      ),
+    );
+    if (query.amount != null &&
+        !screenshot.fields.any(
+          (field) =>
+              field.type == ExtractedFieldType.amount &&
+              field.normalizedValue == query.amount,
+        )) {
+      return false;
+    }
+    if (query.exactIdentifier != null) {
+      final requiredType =
+          query.exactIdentifierType == ExactIdentifierType.orderNumber
+          ? ExtractedFieldType.orderNumber
+          : ExtractedFieldType.referenceNumber;
+      final exact = _normalizeIdentifier(query.exactIdentifier!);
+      if (!screenshot.fields.any(
+        (field) =>
+            field.type == requiredType &&
+            _normalizeIdentifier(field.normalizedValue ?? field.rawValue) ==
+                exact,
+      )) {
+        return false;
+      }
+    }
+    if (query.category != null &&
+        screenshot.category != query.category &&
+        !_hasCategoryClue(normalizedText, query.category!)) {
+      return false;
+    }
+    return true;
+  }
+
+  bool _hasCategoryClue(String text, HelpdeskCategory category) =>
+      switch (category) {
+        HelpdeskCategory.gcashReceipt => RegExp(
+          r'\b(gcash|receipt|payment|money sent)\b',
+        ).hasMatch(text),
+        HelpdeskCategory.order => RegExp(
+          r'\b(order|ordered|checkout|delivery|product|item)\b',
+        ).hasMatch(text),
+        HelpdeskCategory.announcement => RegExp(
+          r'\b(announcement|deadline|due date|student|class)\b',
+        ).hasMatch(text),
+        HelpdeskCategory.other || HelpdeskCategory.unknown => false,
+      };
+
+  String _normalizeIdentifier(String value) =>
+      value.trim().toLowerCase().replaceAll(RegExp(r'\s+'), '');
+
+  List<GalleryScanBlock> _recordBlocks(
+    String assetId,
+    GalleryOcrResult result, {
+    required bool includeCoordinates,
+  }) => result.blocks
+      .asMap()
+      .entries
+      .map(
+        (entry) => GalleryScanBlock(
+          id: 'gallery-$assetId-block-${entry.key}',
+          text: entry.value.text,
+          left: includeCoordinates ? entry.value.left : null,
+          top: includeCoordinates ? entry.value.top : null,
+          width: includeCoordinates ? entry.value.width : null,
+          height: includeCoordinates ? entry.value.height : null,
+        ),
+      )
+      .toList(growable: false);
+
   Future<void> _processImage(
     String assetId,
     String displayName,
     String sourcePath, {
+    HelpdeskQuery? currentQuery,
     DateTime? assetCreatedAt,
   }) async {
     String? imagePath;
     try {
+      GalleryOcrResult result;
+      if (currentQuery != null) {
+        _pipelineStats?.thumbnails++;
+        final thumbnailOcr = Stopwatch()..start();
+        result = await ocrThumbnail(sourcePath);
+        ScanTimings.add('thumbnailOcr', thumbnailOcr.elapsedMicroseconds);
+        if (!matchesQuery(result.recognizedText, currentQuery)) {
+          final record = GalleryScanRecord(
+            assetId: assetId,
+            displayName: displayName,
+            status: 'thumbnail',
+            scannedAt: DateTime.now(),
+            blocks: List.unmodifiable(
+              _recordBlocks(assetId, result, includeCoordinates: false),
+            ),
+            assetCreatedAt: assetCreatedAt,
+          );
+          _records[assetId] = record;
+          await _storage!.saveRecord(record.toJson());
+          onRecord?.call(record);
+          return;
+        }
+        _pipelineStats?.promoted++;
+      }
+
+      _pipelineStats?.fullRes++;
+      final fullResOcr = Stopwatch()..start();
+      result = await ocrFull(sourcePath);
+      ScanTimings.add('fullResOcr', fullResOcr.elapsedMicroseconds);
       final copying = Stopwatch()..start();
       imagePath = await _storage!.saveImage(assetId, sourcePath);
       ScanTimings.add('copy', copying.elapsedMicroseconds);
-      final recognizer = _recognizer ??= TextRecognizer(
-        script: TextRecognitionScript.latin,
-      );
-      final resizing = Stopwatch()..start();
-      OcrInput? input;
-      try {
-        input = await OcrInput.prepare(imagePath);
-      } catch (_) {
-        /* Original remains usable. */
-      }
-      ScanTimings.add('resize', resizing.elapsedMicroseconds);
-      late RecognizedText result;
-      var scaleX = input?.scaleX ?? 1.0;
-      var scaleY = input?.scaleY ?? 1.0;
-      final ocr = Stopwatch()..start();
-      try {
-        try {
-          result = await recognizer.processImage(
-            InputImage.fromFilePath(input?.path ?? imagePath),
-          );
-        } catch (_) {
-          if (input?.resized != true) rethrow;
-          result = await recognizer.processImage(
-            InputImage.fromFilePath(imagePath),
-          );
-          scaleX = scaleY = 1;
-          ScanTimings.add('ocr_full_retry', ocr.elapsedMicroseconds);
-        }
-        final lines = result.blocks.expand((b) => b.lines).toList();
-        if (input?.resized == true &&
-            scaleX != 1 &&
-            (result.text.trim().length < 24 ||
-                lines.length < 2 ||
-                lines.any((l) => l.boundingBox.height < 10))) {
-          final retry = Stopwatch()..start();
-          result = await recognizer.processImage(
-            InputImage.fromFilePath(imagePath),
-          );
-          scaleX = scaleY = 1;
-          ScanTimings.add('ocr_full_retry', retry.elapsedMicroseconds);
-        }
-      } finally {
-        await input?.close();
-      }
-      ScanTimings.add('ocr', ocr.elapsedMicroseconds);
-      final screenshotId = 'gallery-$assetId';
-      final blocks = <GalleryScanBlock>[];
-      for (final textBlock in result.blocks) {
-        for (final line in textBlock.lines) {
-          if (line.text.trim().isEmpty) continue;
-          blocks.add(
-            GalleryScanBlock(
-              id: '$screenshotId-block-${blocks.length}',
-              text: line.text.trim(),
-              left: line.boundingBox.left * scaleX,
-              top: line.boundingBox.top * scaleY,
-              width: line.boundingBox.width * scaleX,
-              height: line.boundingBox.height * scaleY,
-            ),
-          );
-        }
-      }
+      _pipelineStats?.copies++;
       final record = GalleryScanRecord(
         assetId: assetId,
         displayName: displayName,
         status: 'complete',
         scannedAt: DateTime.now(),
         imagePath: imagePath,
-        blocks: List.unmodifiable(blocks),
+        blocks: List.unmodifiable(
+          _recordBlocks(assetId, result, includeCoordinates: true),
+        ),
         assetCreatedAt: assetCreatedAt,
       );
       _records[assetId] = record;

@@ -131,7 +131,7 @@ class _HomeScreenState extends State<HomeScreen> {
     scanner.onRecord = (record) {
       if (!mounted) return;
       setState(() {
-        if (record.isFailed) {
+        if (!record.isSearchable) {
           galleryEvidence.remove(record.assetId);
           _analyzedGallery.remove('gallery-${record.assetId}');
         } else {
@@ -163,7 +163,7 @@ class _HomeScreenState extends State<HomeScreen> {
         scannerError = null;
         scanProgress = scanner.progress;
         for (final record in scanner.records.where(
-          (record) => !record.isFailed,
+          (record) => record.isSearchable,
         )) {
           galleryEvidence[record.assetId] = _evidenceForRecord(record);
         }
@@ -491,7 +491,7 @@ class _HomeScreenState extends State<HomeScreen> {
         return;
       }
       if (!manual &&
-          scanner.records.any((record) => !record.isFailed) &&
+          scanner.records.any((record) => record.isSearchable) &&
           _zeroHitTokens(parsed, dateHint).isNotEmpty) {
         outcome = await _searchWith(parsed, dateHint);
         if (!mounted || ticket != request) return;
@@ -524,6 +524,7 @@ class _HomeScreenState extends State<HomeScreen> {
           additionalCount: additionalCount ?? 40,
           dateFilter: dateHint,
           attemptedAssetIds: attempted,
+          currentQuery: parsed,
         )) {
           if (!mounted || ticket != request) {
             scanner.cancelScan();
@@ -1378,7 +1379,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final running =
         scanning || scanner.isRunning || phase == SearchPhase.searching;
     final indexedCount = scanner.records
-        .where((record) => !record.isFailed)
+        .where((record) => record.isSearchable)
         .length;
     return Container(
       padding: const EdgeInsets.all(14),
@@ -1593,8 +1594,7 @@ class _BotBoxState extends State<BotBox> with SingleTickerProviderStateMixin {
           ? const Duration(milliseconds: 850)
           : const Duration(milliseconds: 3200);
       motion.repeat(reverse: true);
-    } else if (widget.phase == SearchPhase.found &&
-        !animationsDisabled) {
+    } else if (widget.phase == SearchPhase.found && !animationsDisabled) {
       motion.duration = const Duration(milliseconds: 900);
       motion.forward(from: 0);
     } else {
@@ -1701,7 +1701,14 @@ class BotPainter extends CustomPainter {
     );
     line(
       const Offset(134, 115),
-      Offset(happy ? 169 : 160, happy ? 86 : isLookingInBox ? 140 : 137),
+      Offset(
+        happy ? 169 : 160,
+        happy
+            ? 86
+            : isLookingInBox
+            ? 140
+            : 137,
+      ),
       violet,
       9,
     );

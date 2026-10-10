@@ -1,6 +1,7 @@
 import 'package:gallery_helpdesk/gallery_asset_source.dart';
 import 'package:gallery_helpdesk/gallery_scanner.dart';
 import 'package:gallery_helpdesk/gallery_storage_api.dart';
+import 'package:gallery_helpdesk_ai/gallery_helpdesk_ai.dart';
 import 'package:photo_manager/photo_manager.dart';
 
 class SearchMemoryStorage implements GalleryStorage, ScanCatalogStorage {
@@ -148,7 +149,10 @@ class FakeOcrScanner extends GalleryScanner {
   @override
   int get failedCount => records.where((record) => record.isFailed).length;
   @override
-  Future<void> scanSingleAsset(AssetEntity asset) async {
+  Future<void> scanSingleAsset(
+    AssetEntity asset, {
+    HelpdeskQuery? currentQuery,
+  }) async {
     await beforeOcr?.call();
     processedIds.add(asset.id);
     final record = fakeRecord(
@@ -166,12 +170,14 @@ class FakeOcrScanner extends GalleryScanner {
     required int additionalCount,
     DateTimeRange? dateFilter,
     Set<String>? attemptedAssetIds,
+    HelpdeskQuery? currentQuery,
   }) {
     batchSizes.add(additionalCount);
     return super.scanUpTo(
       additionalCount: additionalCount,
       dateFilter: dateFilter,
       attemptedAssetIds: attemptedAssetIds,
+      currentQuery: currentQuery,
     );
   }
 }

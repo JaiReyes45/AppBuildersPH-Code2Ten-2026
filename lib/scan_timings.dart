@@ -21,6 +21,11 @@ class ScanTimings {
         'averageMs': _micros[stage]! / _counts[stage]! / 1000,
       },
   };
+  static void reset() {
+    _micros.clear();
+    _counts.clear();
+  }
+
   static void report() {
     if (kDebugMode) debugPrint('SSeeker timings: $snapshot');
   }

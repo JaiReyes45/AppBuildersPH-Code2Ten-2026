@@ -145,10 +145,13 @@ class ObjectBoxGalleryStorage
     _semantic.removeAll();
   }
 
-  @override
+    @override
   Future<int> count() async {
     final query = store.screenshots
-        .query(IndexedScreenshot_.status.notEquals('failed'))
+        .query(
+          IndexedScreenshot_.status.notEquals('failed') &
+              IndexedScreenshot_.status.notEquals('thumbnail'),
+        )
         .build();
     try {
       return query.count();
@@ -160,7 +163,10 @@ class ObjectBoxGalleryStorage
   @override
   Future<Set<String>> allAssetIds() async {
     final query = store.screenshots
-        .query(IndexedScreenshot_.status.notEquals('failed'))
+        .query(
+          IndexedScreenshot_.status.notEquals('failed') &
+              IndexedScreenshot_.status.notEquals('thumbnail'),
+        )
         .build();
     try {
       return query.property(IndexedScreenshot_.galleryAssetId).find().toSet();
@@ -168,7 +174,7 @@ class ObjectBoxGalleryStorage
       query.close();
     }
   }
-
+  
   Query<ScanCoverage> _coverageQuery(DateTimeRange range) => store.coverage
       .query(
         ScanCoverage_.rangeStart.equals(range.start.millisecondsSinceEpoch) &

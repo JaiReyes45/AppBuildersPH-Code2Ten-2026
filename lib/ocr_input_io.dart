@@ -15,7 +15,7 @@ class OcrInput {
     }
   }
 
-  static Future<OcrInput> prepare(String path) async {
+  static Future<OcrInput> prepare(String path, {int maxLongEdge = 1600}) async {
     final buffer = await ui.ImmutableBuffer.fromUint8List(
       await File(path).readAsBytes(),
     );
@@ -27,8 +27,8 @@ class OcrInput {
       final longest = descriptor.width > descriptor.height
           ? descriptor.width
           : descriptor.height;
-      if (longest <= 1600) return OcrInput(path, 1, 1, false);
-      final ratio = 1600 / longest;
+      if (longest <= maxLongEdge) return OcrInput(path, 1, 1, false);
+      final ratio = maxLongEdge / longest;
       codec = await descriptor.instantiateCodec(
         targetWidth: (descriptor.width * ratio).round(),
         targetHeight: (descriptor.height * ratio).round(),
